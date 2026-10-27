@@ -406,6 +406,26 @@ public sealed class BedrockPackInspectorTests {
         } finally { Directory.Delete(fixture, true); }
     }
 
+    public void ChecksDependenciesAcrossRootsWithoutClaimingWorldActivation() {
+        string fixture = Path.Combine(Path.GetTempPath(), "pcl-bedrock-dependency-test-" + Guid.NewGuid().ToString("N"));
+        string first = Path.Combine(fixture, "account"), shared = Path.Combine(fixture, "shared"), pack = Path.Combine(shared, "resource_packs", "dep");
+        Directory.CreateDirectory(first); Directory.CreateDirectory(pack);
+        try {
+            File.WriteAllText(Path.Combine(pack, "manifest.json"), Manifest);
+            var source = new BedrockPackInfo("source", "", Guid.NewGuid(), "1.0.0", ["data"],
+                ["11111111-1111-4111-8111-111111111111 1.2.3", "@minecraft/server 1.2.0"], null);
+            var roots = new[] { new BedrockDataRoot(first, "account"), new BedrockDataRoot(shared, "shared", false) };
+            var report = BedrockDependencyCheck.Analyze(source, roots);
+            Check(report.Results[0].Status.Contains("世界启用状态未检查") && report.Results[1].Status.Contains("未验证"),
+                "dependency status was overstated");
+            var wrongVersion = new BedrockPackInfo("source", "", Guid.NewGuid(), "1.0.0", ["data"],
+                ["11111111-1111-4111-8111-111111111111 9.9.9"], null);
+            Check(BedrockDependencyCheck.Analyze(wrongVersion, roots).Results.Single().Status.Contains("未发现声明版本"), "version mismatch missed");
+            Directory.CreateDirectory(Path.Combine(first, "behavior_packs", "unreadable"));
+            Check(BedrockDependencyCheck.Analyze(wrongVersion, roots).Results.Single().Status.Contains("无法确认"), "incomplete scan was not reported");
+        } finally { Directory.Delete(fixture, true); }
+    }
+
     public void TransactionRechecksCrossRootScopeBeforeCommit() {
         string fixture = Path.Combine(Path.GetTempPath(), "pcl-bedrock-scope-transaction-test-" + Guid.NewGuid().ToString("N"));
         string account = Path.Combine(fixture, "account"), shared = Path.Combine(fixture, "shared"), source = Path.Combine(fixture, "source");

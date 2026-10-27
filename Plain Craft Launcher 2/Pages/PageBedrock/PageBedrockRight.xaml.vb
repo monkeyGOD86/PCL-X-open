@@ -274,6 +274,7 @@ Public Class PageBedrockRight
     Private Sub AddonSelectionChanged(sender As Object, e As SelectionChangedEventArgs) Handles ComboAddons.SelectionChanged
         Dim Item = TryCast(ComboAddons.SelectedItem, MyComboBoxItem)
         Dim Addon = TryCast(Item?.Tag, BedrockInstalledAddon)
+        BtnCheckDependencies.IsEnabled = Not IsBusy AndAlso Addon IsNot Nothing AndAlso Addon.Manifest IsNot Nothing AndAlso Addon.Manifest.Dependencies.Count > 0
         If Addon Is Nothing Then
             LabAddonDetails.Text = ""
         ElseIf Addon.Manifest Is Nothing Then
@@ -285,6 +286,36 @@ Public Class PageBedrockRight
                                    If(Pack.Dependencies.Count = 0, "", "依赖：" & String.Join(", ", Pack.Dependencies) & vbCrLf) &
                                    If(Addon.Warnings.Count = 0, "", "提示：" & String.Join("；", Addon.Warnings))
         End If
+    End Sub
+
+    Private Async Sub CheckDependenciesClicked(sender As Object, e As EventArgs) Handles BtnCheckDependencies.Click
+        Dim Installation = TryCast(TryCast(ComboInstall.SelectedItem, MyComboBoxItem)?.Tag, BedrockInstallation)
+        Dim Root = TryCast(TryCast(ComboRoots.SelectedItem, MyComboBoxItem)?.Tag, BedrockDataRoot)
+        Dim Addon = TryCast(TryCast(ComboAddons.SelectedItem, MyComboBoxItem)?.Tag, BedrockInstalledAddon)
+        If IsBusy OrElse Installation Is Nothing OrElse Root Is Nothing OrElse Addon Is Nothing OrElse Addon.Manifest Is Nothing Then Return
+        Dim PreviousDetails = LabAddonDetails.Text
+        SetBusy(True)
+        LabAddonStatus.Text = "正在检查候选数据目录中的依赖…"
+        Try
+            Dim Report = Await Task.Run(Function()
+                                            Dim Roots = ValidateInstallTarget(Installation, Root)
+                                            Dim Current = BedrockAddonCatalog.Read(Root).FirstOrDefault(Function(Item) String.Equals(Item.Path, Addon.Path, StringComparison.OrdinalIgnoreCase))
+                                            If Current Is Nothing OrElse Current.Manifest Is Nothing OrElse Current.Manifest.Uuid <> Addon.Manifest.Uuid OrElse
+                                               Current.Manifest.Version <> Addon.Manifest.Version OrElse Not Current.Manifest.Dependencies.SequenceEqual(Addon.Manifest.Dependencies) Then
+                                                Throw New InvalidOperationException("所选包的清单已变化，请重新读取附加包。")
+                                            End If
+                                            Return BedrockDependencyCheck.Analyze(Current.Manifest, Roots)
+                                        End Function)
+            Dim Lines = Report.Results.Select(Function(Item) Item.Dependency & "：" & Item.Status)
+            LabAddonDetails.Text = PreviousDetails & vbCrLf & "依赖检查：" & vbCrLf & String.Join(vbCrLf, Lines)
+            LabAddonStatus.Text = If(Report.IncompleteRoots.Count = 0, "已检查候选目录；结果不表示世界已启用依赖。",
+                                     "部分候选目录无法完整读取；未发现的依赖不能判定为缺失。")
+        Catch ex As Exception
+            LabAddonStatus.Text = "检查依赖失败：" & ex.Message
+            Logger.Warn(ex, "检查基岩版附加包依赖失败")
+        Finally
+            SetBusy(False)
+        End Try
     End Sub
 
     Private Async Sub ReadWorldsClicked(sender As Object, e As EventArgs) Handles BtnReadWorlds.Click
@@ -627,6 +658,8 @@ Public Class PageBedrockRight
         Dim Transaction = TryCast(TransactionItem?.Tag, BedrockAddonTransactionInfo)
         BtnRollbackTransaction.IsEnabled = Not Value AndAlso Transaction IsNot Nothing AndAlso Transaction.Error Is Nothing AndAlso Transaction.Installed > 0
         ComboAddons.IsEnabled = Not Value AndAlso ComboAddons.Items.Count > 0
+        Dim SelectedAddon = TryCast(TryCast(ComboAddons.SelectedItem, MyComboBoxItem)?.Tag, BedrockInstalledAddon)
+        BtnCheckDependencies.IsEnabled = Not Value AndAlso SelectedAddon IsNot Nothing AndAlso SelectedAddon.Manifest IsNot Nothing AndAlso SelectedAddon.Manifest.Dependencies.Count > 0
         ComboWorlds.IsEnabled = Not Value AndAlso ComboWorlds.Items.Count > 0
         Dim WorldItem = TryCast(ComboWorlds.SelectedItem, MyComboBoxItem)
         Dim World = TryCast(WorldItem?.Tag, BedrockWorldInfo)
