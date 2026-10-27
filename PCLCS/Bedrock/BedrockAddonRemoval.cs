@@ -22,6 +22,9 @@ public static class BedrockAddonRemoval {
         BedrockDataRootFinder.EnsureNoReparsePoints(backupRoot);
         if (worldRoots.Count is < 1 or > 128) throw new InvalidDataException("必须确认用于世界引用检查的数据目录。");
         string[] lockPaths = worldRoots.Select(item => NormalizeRoot(item)).Concat([rootPath]).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+        if (root.SupportsWorlds && !worldRoots.Any(item => string.Equals(NormalizeRoot(item), rootPath, StringComparison.OrdinalIgnoreCase)))
+            throw new InvalidDataException("世界检查范围必须包含所选账户目录。");
+        if (lockPaths.Any(path => Contains(path, backupRoot))) throw new InvalidDataException("备份不能位于检查范围内的游戏数据目录中。");
         using var rootLock = BedrockRootLock.AcquireAll(lockPaths);
         var match = BedrockAddonCatalog.Read(root).SingleOrDefault(item =>
             string.Equals(Path.GetFullPath(item.Path).TrimEnd(Path.DirectorySeparatorChar), source, StringComparison.OrdinalIgnoreCase));

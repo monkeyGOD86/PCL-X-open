@@ -350,6 +350,10 @@ public sealed class BedrockPackInspectorTests {
             var target = new BedrockDataRoot(shared, "shared", false);
             var worldRoot = new BedrockDataRoot(account, "account");
             try {
+                BedrockAddonRemoval.Remove(target, BedrockAddonCatalog.Read(target).Single(), BedrockDirectoryInstaller.Preview(pack), account, [worldRoot]);
+                throw new Exception("backup inside account data was accepted");
+            } catch (InvalidDataException) { }
+            try {
                 BedrockAddonRemoval.Remove(target, BedrockAddonCatalog.Read(target).Single(), BedrockDirectoryInstaller.Preview(pack), backup, [worldRoot]);
                 throw new Exception("in-use pack was removed");
             } catch (InvalidDataException) { }
