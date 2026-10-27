@@ -18,10 +18,24 @@
             <local:MyCard Title="内容管理" Margin="0,0,0,15">
                 <StackPanel Margin="21,40,21,20">
                     <TextBlock Text="选择或拖入 .mcpack / .mcaddon 文件，查看包信息。" TextWrapping="Wrap" />
-                    <TextBlock x:Name="LabPackInfo" Text="附加包导入和世界管理将在完成数据保护验证后开放。" Margin="0,10,0,0" TextWrapping="Wrap" />
+                    <TextBlock x:Name="LabPackInfo" Text="附加包导入和世界配置将在完成数据保护验证后开放。" Margin="0,10,0,0" TextWrapping="Wrap" />
                     <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
                         <local:MyButton x:Name="BtnAddons" Text="预览附加包" Height="35" MinWidth="120" />
-                        <local:MyButton x:Name="BtnWorlds" Text="世界管理" Height="35" MinWidth="120" Margin="10,0,0,0" IsEnabled="False" />
+                        <local:MyButton x:Name="BtnWorlds" Text="查看世界" Height="35" MinWidth="120" Margin="10,0,0,0" IsEnabled="False" />
+                    </StackPanel>
+                </StackPanel>
+            </local:MyCard>
+            <local:MyCard x:Name="CardWorlds" Title="本地世界" Margin="0,0,0,15" Visibility="Collapsed">
+                <StackPanel Margin="21,40,21,20">
+                    <TextBlock x:Name="LabRootsStatus" TextWrapping="Wrap" Text="请先确认属于目标游戏账户的数据目录。" />
+                    <local:MyComboBox x:Name="ComboRoots" Height="34" Margin="0,10,0,0" IsEnabled="False" />
+                    <local:MyButton x:Name="BtnReadWorlds" Text="读取世界列表" Height="35" Width="130" HorizontalAlignment="Left" Margin="0,10,0,0" IsEnabled="False" />
+                    <TextBlock x:Name="LabWorldStatus" Margin="0,12,0,0" TextWrapping="Wrap" />
+                    <local:MyComboBox x:Name="ComboWorlds" Height="34" Margin="0,10,0,0" IsEnabled="False" />
+                    <TextBlock x:Name="LabWorldDetails" Margin="0,10,0,0" TextWrapping="Wrap" />
+                    <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
+                        <local:MyButton x:Name="BtnBackup" Text="备份所选世界" Height="35" Width="130" IsEnabled="False" />
+                        <local:MyButton x:Name="BtnRestore" Text="恢复为新世界" Height="35" Width="130" Margin="10,0,0,0" IsEnabled="False" />
                     </StackPanel>
                 </StackPanel>
             </local:MyCard>

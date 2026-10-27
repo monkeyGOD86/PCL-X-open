@@ -57,7 +57,173 @@ Public Class PageBedrockRight
                               "游戏授权由 Windows 和游戏处理。"
         End If
         BtnStart.IsEnabled = Not IsBusy AndAlso Installation IsNot Nothing AndAlso Installation.CanLaunch
+        BtnWorlds.IsEnabled = Not IsBusy AndAlso Installation IsNot Nothing
+        If CardWorlds IsNot Nothing Then CardWorlds.Visibility = Visibility.Collapsed
     End Sub
+
+    Private Async Sub WorldsClicked(sender As Object, e As EventArgs) Handles BtnWorlds.Click
+        Dim Item = TryCast(ComboInstall.SelectedItem, MyComboBoxItem)
+        Dim Installation = TryCast(Item?.Tag, BedrockInstallation)
+        If IsBusy OrElse Installation Is Nothing Then Return
+        CardWorlds.Visibility = Visibility.Visible
+        Dim ScrollOperation = Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Loaded, New Action(Sub() PanBack.ScrollToBottom()))
+        ComboRoots.Items.Clear()
+        ComboWorlds.Items.Clear()
+        LabWorldStatus.Text = ""
+        LabWorldDetails.Text = ""
+        LabRootsStatus.Text = "正在查找候选数据目录…"
+        SetBusy(True)
+        Try
+            Dim Roots = Await Task.Run(Function() (New BedrockDataRootFinder()).Find(Installation))
+            For Each Root In Roots
+                ComboRoots.Items.Add(New MyComboBoxItem With {.Content = Root.Source & "：" & Root.Path, .Tag = Root})
+            Next
+            LabRootsStatus.Text = If(Roots.Count = 0,
+                "未发现可访问的数据目录。",
+                "请确认并选择属于目标游戏账户的数据目录；启动器无法自动确认游戏账户。")
+        Catch ex As Exception
+            LabRootsStatus.Text = "查找数据目录失败：" & ex.Message
+            Logger.Warn(ex, "查找基岩版数据目录失败")
+        Finally
+            SetBusy(False)
+        End Try
+    End Sub
+
+    Private Sub RootSelectionChanged(sender As Object, e As SelectionChangedEventArgs) Handles ComboRoots.SelectionChanged
+        BtnReadWorlds.IsEnabled = Not IsBusy AndAlso ComboRoots.SelectedItem IsNot Nothing
+        BtnRestore.IsEnabled = Not IsBusy AndAlso ComboRoots.SelectedItem IsNot Nothing
+        ComboWorlds.Items.Clear()
+        LabWorldStatus.Text = ""
+        LabWorldDetails.Text = ""
+    End Sub
+
+    Private Async Sub ReadWorldsClicked(sender As Object, e As EventArgs) Handles BtnReadWorlds.Click
+        Dim Item = TryCast(ComboRoots.SelectedItem, MyComboBoxItem)
+        Dim Root = TryCast(Item?.Tag, BedrockDataRoot)
+        If IsBusy OrElse Root Is Nothing Then Return
+        ComboWorlds.Items.Clear()
+        LabWorldStatus.Text = "正在读取世界列表…"
+        LabWorldDetails.Text = ""
+        SetBusy(True)
+        Try
+            Dim Worlds = Await Task.Run(Function() BedrockWorldReader.Read(Root))
+            For Each World In Worlds
+                ComboWorlds.Items.Add(New MyComboBoxItem With {.Content = World.Name, .Tag = World})
+            Next
+            LabWorldStatus.Text = If(Worlds.Count = 0, "此目录中没有发现本地世界。", $"发现 {Worlds.Count} 个世界，请选择以查看附加包。")
+        Catch ex As Exception
+            LabWorldStatus.Text = "读取世界失败：" & ex.Message
+            Logger.Warn(ex, "读取基岩版世界失败")
+        Finally
+            SetBusy(False)
+        End Try
+    End Sub
+
+    Private Sub WorldSelectionChanged(sender As Object, e As SelectionChangedEventArgs) Handles ComboWorlds.SelectionChanged
+        Dim Item = TryCast(ComboWorlds.SelectedItem, MyComboBoxItem)
+        Dim World = TryCast(Item?.Tag, BedrockWorldInfo)
+        BtnBackup.IsEnabled = Not IsBusy AndAlso World IsNot Nothing AndAlso World.HasLevelData
+        If World Is Nothing Then
+            LabWorldDetails.Text = ""
+            Return
+        End If
+        If World.Warning IsNot Nothing Then
+            LabWorldDetails.Text = World.Warning
+            Return
+        End If
+        Dim ResourceLines = If(World.ResourcePacks.Count = 0, "无", String.Join(vbCrLf, World.ResourcePacks))
+        Dim BehaviorLines = If(World.BehaviorPacks.Count = 0, "无", String.Join(vbCrLf, World.BehaviorPacks))
+        LabWorldDetails.Text = $"资源包：{ResourceLines}" & vbCrLf & $"行为包：{BehaviorLines}" & vbCrLf &
+                               If(World.HasLevelData, "", "未发现 level.dat。" & vbCrLf) & If(World.Warning, "")
+    End Sub
+
+    Private Async Sub BackupClicked(sender As Object, e As EventArgs) Handles BtnBackup.Click
+        Dim RootItem = TryCast(ComboRoots.SelectedItem, MyComboBoxItem)
+        Dim WorldItem = TryCast(ComboWorlds.SelectedItem, MyComboBoxItem)
+        Dim Root = TryCast(RootItem?.Tag, BedrockDataRoot)
+        Dim World = TryCast(WorldItem?.Tag, BedrockWorldInfo)
+        If IsBusy OrElse Root Is Nothing OrElse World Is Nothing Then Return
+        If IsKnownBedrockProcessRunning() Then
+            MyMsgBox("请先关闭 Minecraft 基岩版，再备份世界，以避免备份进行时游戏修改文件。", "世界备份")
+            Return
+        End If
+        If MyMsgBox("请确认 Minecraft 已关闭且存档同步已完成。" & vbCrLf & vbCrLf &
+                    "数据目录：" & Root.Path & vbCrLf & "世界：" & World.Name & vbCrLf &
+                    "世界目录：" & World.Path, "确认备份目标", "继续", "取消") <> 1 Then Return
+        Dim Dialog As New Microsoft.Win32.SaveFileDialog With {
+            .Filter = "ZIP 备份 (*.zip)|*.zip",
+            .FileName = "MinecraftWorldBackup-" & Date.Now.ToString("yyyyMMdd-HHmmss") & ".zip",
+            .OverwritePrompt = False,
+            .CheckPathExists = True
+        }
+        If Dialog.ShowDialog() <> True Then Return
+        Dim BackupPath = Dialog.FileName
+        SetBusy(True)
+        LabWorldStatus.Text = "正在备份并校验世界…"
+        Try
+            Dim Info = Await Task.Run(Function()
+                                          If IsKnownBedrockProcessRunning() Then Throw New InvalidOperationException("Minecraft 正在运行，请关闭后重试。")
+                                          Return BedrockWorldBackup.Create(Root, World, BackupPath)
+                                      End Function)
+            LabWorldStatus.Text = $"备份已创建并校验：{Info.Files} 个文件。"
+        Catch ex As Exception
+            LabWorldStatus.Text = "备份失败：" & ex.Message
+            Logger.Warn(ex, "基岩版世界备份失败")
+        Finally
+            SetBusy(False)
+        End Try
+    End Sub
+
+    Private Async Sub RestoreClicked(sender As Object, e As EventArgs) Handles BtnRestore.Click
+        Dim RootItem = TryCast(ComboRoots.SelectedItem, MyComboBoxItem)
+        Dim Root = TryCast(RootItem?.Tag, BedrockDataRoot)
+        If IsBusy OrElse Root Is Nothing Then Return
+        If IsKnownBedrockProcessRunning() Then
+            MyMsgBox("请先关闭 Minecraft 基岩版，再恢复世界。", "恢复世界")
+            Return
+        End If
+        Dim Dialog As New Microsoft.Win32.OpenFileDialog With {
+            .Filter = "PCL 世界备份 (*.zip)|*.zip", .CheckFileExists = True, .Multiselect = False
+        }
+        If Dialog.ShowDialog() <> True Then Return
+        Dim BackupPath = Dialog.FileName
+        SetBusy(True)
+        LabWorldStatus.Text = "正在校验备份…"
+        Try
+            Dim Info = Await Task.Run(Function() BedrockWorldBackup.Verify(BackupPath))
+            If MyMsgBox("请确认 Minecraft 已关闭且存档同步已完成。" & vbCrLf & vbCrLf &
+                        "目标数据目录：" & Root.Path & vbCrLf & $"备份世界：{Info.WorldName}（{Info.Files} 个文件）" & vbCrLf &
+                        "将创建新的世界目录，不覆盖现有目录。游戏及云同步对重复世界标识的处理尚未验证，请保留原备份。", "确认恢复目标", "恢复", "取消") <> 1 Then
+                LabWorldStatus.Text = "已取消恢复。"
+                Return
+            End If
+            LabWorldStatus.Text = "正在恢复并校验世界…"
+            Dim Restored = Await Task.Run(Function()
+                                              If IsKnownBedrockProcessRunning() Then Throw New InvalidOperationException("Minecraft 正在运行，请关闭后重试。")
+                                              Return BedrockWorldBackup.RestoreAsNew(Root, BackupPath)
+                                          End Function)
+            LabWorldStatus.Text = "已恢复为新世界。请重新读取世界列表，并在游戏中确认。目录：" & Restored
+        Catch ex As Exception
+            LabWorldStatus.Text = "恢复失败：" & ex.Message
+            Logger.Warn(ex, "基岩版世界恢复失败")
+        Finally
+            SetBusy(False)
+        End Try
+    End Sub
+
+    Private Shared Function IsKnownBedrockProcessRunning() As Boolean
+        For Each ProcessName In {"Minecraft.Windows", "GameLaunchHelper"}
+            Dim Processes = Process.GetProcessesByName(ProcessName)
+            Try
+                If Processes.Length > 0 Then Return True
+            Finally
+                For Each GameProcess In Processes
+                    GameProcess.Dispose()
+                Next
+            End Try
+        Next
+        Return False
+    End Function
 
     Private Async Sub StartClicked(sender As Object, e As EventArgs) Handles BtnStart.Click
         If IsBusy Then Return
@@ -120,5 +286,13 @@ Public Class PageBedrockRight
         Dim Item = TryCast(ComboInstall.SelectedItem, MyComboBoxItem)
         Dim Installation = TryCast(Item?.Tag, BedrockInstallation)
         BtnStart.IsEnabled = Not Value AndAlso Installation IsNot Nothing AndAlso Installation.CanLaunch
+        BtnWorlds.IsEnabled = Not Value AndAlso Installation IsNot Nothing
+        ComboRoots.IsEnabled = Not Value AndAlso ComboRoots.Items.Count > 0
+        BtnReadWorlds.IsEnabled = Not Value AndAlso ComboRoots.SelectedItem IsNot Nothing
+        BtnRestore.IsEnabled = Not Value AndAlso ComboRoots.SelectedItem IsNot Nothing
+        ComboWorlds.IsEnabled = Not Value AndAlso ComboWorlds.Items.Count > 0
+        Dim WorldItem = TryCast(ComboWorlds.SelectedItem, MyComboBoxItem)
+        Dim World = TryCast(WorldItem?.Tag, BedrockWorldInfo)
+        BtnBackup.IsEnabled = Not Value AndAlso World IsNot Nothing AndAlso World.HasLevelData
     End Sub
 End Class
