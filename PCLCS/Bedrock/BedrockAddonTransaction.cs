@@ -2,10 +2,50 @@ using System.Text;
 
 namespace PCLCS.Bedrock;
 
+public sealed class BedrockAddonTransactionInfo(string path, string state, int staged, int installed, int missing, string? error) {
+    public string Path { get; } = path;
+    public string State { get; } = state;
+    public int Staged { get; } = staged;
+    public int Installed { get; } = installed;
+    public int Missing { get; } = missing;
+    public string? Error { get; } = error;
+}
+
 /// <summary>Experimental journalled multi-pack installation; not connected to the UI.</summary>
 public static class BedrockAddonTransaction {
     private const string Prefix = ".pcl-addon-transaction-";
     private const string JournalName = "journal.json";
+
+    /// <summary>Reports path-based status only; commit and rollback verify contents independently.</summary>
+    public static IReadOnlyList<BedrockAddonTransactionInfo> List(BedrockDataRoot root) {
+        string rootPath = NormalizeRoot(root);
+        using var rootLock = BedrockRootLock.Acquire(rootPath);
+        var result = new List<BedrockAddonTransactionInfo>();
+        foreach (string candidate in Directory.EnumerateDirectories(rootPath, Prefix + "*")) {
+            if (result.Count >= 1024) throw new InvalidDataException("事务目录数量超过读取限制。");
+            try {
+                var (path, id, records) = ReadJournal(rootPath, candidate);
+                int staged = 0, installed = 0, missing = 0;
+                bool ambiguous = false;
+                for (int i = 0; i < records.Count; i++) {
+                    string stage = Stage(path, i), destination = Destination(rootPath, id, i, (JObject)records[i]);
+                    if (File.Exists(stage) || File.Exists(destination)) { ambiguous = true; continue; }
+                    bool hasStage = Directory.Exists(stage), hasDestination = Directory.Exists(destination);
+                    if (hasStage && hasDestination) ambiguous = true;
+                    else if (hasStage) staged++;
+                    else if (hasDestination) installed++;
+                    else missing++;
+                }
+                string state = ambiguous ? "路径冲突" : missing > 0 ? "准备未完成" :
+                    staged == records.Count ? "已暂存" : installed == records.Count ? "已移动" : "部分移动";
+                result.Add(new(path, state, staged, installed, missing, null));
+            } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or DecoderFallbackException or
+                                       InvalidDataException or FormatException or InvalidCastException or OverflowException or ArgumentException) {
+                result.Add(new(candidate, "记录不可读取", 0, 0, 0, ex.Message));
+            }
+        }
+        return result;
+    }
 
     public static string Prepare(BedrockDataRoot root, IReadOnlyList<BedrockPreparedPack> packs) {
         if (packs.Count is < 1 or > 16) throw new InvalidDataException("每次事务只能准备 1 至 16 个包。");

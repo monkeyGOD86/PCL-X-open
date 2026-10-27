@@ -218,8 +218,10 @@ public sealed class BedrockPackInspectorTests {
             var root = new BedrockDataRoot(game, "fixture");
             string transaction = BedrockAddonTransaction.Prepare(root, packs);
             Check(Directory.GetDirectories(category).Length == 0, "prepare installed a package");
+            Check(BedrockAddonTransaction.List(root).Single().State == "已暂存", "prepared transaction not reported");
             BedrockAddonTransaction.Commit(root, transaction);
             Check(Directory.GetDirectories(category).Length == 2, "transaction did not install both packages");
+            Check(BedrockAddonTransaction.List(root).Single().State == "已移动", "committed transaction not reported");
             BedrockAddonTransaction.Rollback(root, transaction);
             Check(Directory.GetDirectories(category).Length == 0 && Directory.Exists(Path.Combine(transaction, "pack-0")) &&
                 Directory.Exists(Path.Combine(transaction, "pack-1")), "rollback did not preserve both packages");
@@ -240,6 +242,7 @@ public sealed class BedrockPackInspectorTests {
             string id = Path.GetFileName(transaction).Substring(".pcl-addon-transaction-".Length);
             string destination = Path.Combine(category, "pcl-" + id + "-0");
             Directory.Move(Path.Combine(transaction, "pack-0"), destination); // Simulate interruption after one move.
+            Check(BedrockAddonTransaction.List(root).Single().State == "部分移动", "interrupted transaction not reported");
             File.WriteAllText(Path.Combine(destination, "new.txt"), "changed");
             try {
                 BedrockAddonTransaction.Rollback(root, transaction);
@@ -264,6 +267,7 @@ public sealed class BedrockPackInspectorTests {
             string transaction = BedrockAddonTransaction.Prepare(root, [new BedrockPreparedPack(source, BedrockDirectoryInstaller.Preview(source))]);
             string journal = Path.Combine(transaction, "journal.json");
             File.WriteAllText(journal, File.ReadAllText(journal).Replace("resource_packs", "../outside"));
+            Check(BedrockAddonTransaction.List(root).Single().State == "记录不可读取", "damaged journal not reported");
             try {
                 BedrockAddonTransaction.Commit(root, transaction);
                 throw new Exception("tampered journal accepted");
