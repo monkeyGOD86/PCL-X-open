@@ -79,7 +79,11 @@ public static class BedrockWorldReader {
         int scanned = 0;
         foreach (string worldPath in Directory.EnumerateDirectories(worldRoot).Take(1025)) {
             if (++scanned > 1024) throw new InvalidDataException("世界数量超过读取限制。");
-            if ((File.GetAttributes(worldPath) & FileAttributes.ReparsePoint) != 0) continue;
+            if ((File.GetAttributes(worldPath) & FileAttributes.ReparsePoint) != 0) {
+                worlds.Add(new(System.IO.Path.GetFullPath(worldPath), System.IO.Path.GetFileName(worldPath), false, [], [],
+                    "世界目录是链接或重解析点，无法安全读取。"));
+                continue;
+            }
             string name = System.IO.Path.GetFileName(worldPath);
             bool hasLevel = File.Exists(System.IO.Path.Combine(worldPath, "level.dat"));
             string? warning = null;
