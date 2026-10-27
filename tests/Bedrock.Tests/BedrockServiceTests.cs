@@ -28,6 +28,7 @@ public class BedrockServiceTests {
             worldTests.RefusesToOverwriteExistingBackup,
             worldTests.RestoresAsNewWithoutOverwritingOriginal,
             worldTests.RejectsCorruptRestoreBeforeCreatingWorld,
+            worldTests.PreservesStagedFilesWhenRestoreFails,
             worldTests.RejectsSharedRootForWorldOperations,
             worldTests.DistinguishesSharedContentDirectory,
             worldTests.DetectsWorldPackUsageAndIncompleteWorlds,

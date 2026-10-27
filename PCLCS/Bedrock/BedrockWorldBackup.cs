@@ -93,7 +93,7 @@ public static class BedrockWorldBackup {
             return verified;
         } catch (Exception ex) when (temporaryCreated) {
             // Do not delete a path another process might have replaced after the stream closed.
-            throw new IOException("世界备份未完成；临时文件保留供检查：" + temporary, ex);
+            throw new IOException("世界备份未完成：" + ex.Message + "；临时文件保留供检查：" + temporary, ex);
         }
     }
 
@@ -188,7 +188,10 @@ public static class BedrockWorldBackup {
     }
 
     /// <summary>Restores a verified backup as a new world, leaving existing worlds untouched.</summary>
-    public static string RestoreAsNew(BedrockDataRoot root, string backupPath) {
+    public static string RestoreAsNew(BedrockDataRoot root, string backupPath) => RestoreAsNew(root, backupPath, null);
+
+    // Allows deterministic testing of failures after staging and before the atomic move.
+    internal static string RestoreAsNew(BedrockDataRoot root, string backupPath, Action<string>? beforeMove) {
         if (!root.SupportsWorlds) throw new InvalidDataException("共享内容目录不是用户世界目录。");
         string rootPath = Path.GetFullPath(root.Path).TrimEnd(Path.DirectorySeparatorChar);
         string worldsPath = Path.Combine(rootPath, "minecraftWorlds");
@@ -244,36 +247,13 @@ public static class BedrockWorldBackup {
             }
             BedrockDataRootFinder.EnsureNoReparsePoints(stage);
             BedrockDataRootFinder.EnsureNoReparsePoints(worldsPath);
+            beforeMove?.Invoke(stage);
             Directory.Move(stage, destination);
             return destination;
         } catch (Exception ex) {
-            try {
-                CleanupStage(stage, rootPath, id, files, directories);
-            } catch (Exception cleanup) {
-                throw new IOException("恢复失败，无法清理临时目录，请保留并检查：" + stage, new AggregateException(ex, cleanup));
-            }
-            throw;
+            // Retain the entire stage: another process may have changed its contents after creation.
+            throw new IOException("世界恢复未完成：" + ex.Message + "；临时目录保留供检查：" + stage, ex);
         }
-    }
-
-    private static void CleanupStage(string stage, string rootPath, string id, JArray files, JArray directories) {
-        if (!Directory.Exists(stage)) return;
-        if (!string.Equals(Path.GetDirectoryName(Path.GetFullPath(stage)), rootPath, StringComparison.OrdinalIgnoreCase) ||
-            Path.GetFileName(stage) != ".pcl-restore-" + id) throw new InvalidDataException("恢复临时目录无效。");
-        BedrockDataRootFinder.EnsureNoReparsePoints(stage);
-        foreach (JObject file in files.Cast<JObject>()) {
-            string path = RestorePath(stage, file.Value<string>("path")!);
-            if (!File.Exists(path)) continue;
-            BedrockDataRootFinder.EnsureNoReparsePoints(path);
-            File.Delete(path);
-        }
-        foreach (string relative in directories.Select(token => token.Value<string>()!).OrderByDescending(path => path.Count(ch => ch == '/'))) {
-            string path = RestorePath(stage, relative);
-            if (!Directory.Exists(path)) continue;
-            BedrockDataRootFinder.EnsureNoReparsePoints(path);
-            Directory.Delete(path); // Only empty directories listed in the validated backup.
-        }
-        Directory.Delete(stage);
     }
 
     private static string RestorePath(string stage, string relative) {

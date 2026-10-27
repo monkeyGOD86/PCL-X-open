@@ -97,7 +97,7 @@ public sealed class BedrockWorldPackEditorTests {
             File.WriteAllText(Path.Combine(world, "level.dat"), "fixture");
             run(new BedrockDataRoot(root, "fixture"), new BedrockWorldInfo(world, "fixture", true, [], [], null), backup);
             Check(File.ReadAllText(Path.Combine(world, "level.dat")) == "fixture", "world data changed");
-        } finally { Directory.Delete(fixture, true); }
+        } finally { TestPaths.DeleteFixture(fixture); }
     }
     private static void Check(bool condition, string message) { if (!condition) throw new Exception(message); }
 }

@@ -97,7 +97,7 @@ public sealed class BedrockPackInspectorTests {
             } catch (InvalidDataException) { }
             Check(File.ReadAllText(Path.Combine(installed, "textures", "test.txt")) == "original", "existing package was overwritten");
             Check(Directory.GetDirectories(Path.Combine(rootPath, "resource_packs")).Length == 1, "duplicate directory created");
-        } finally { Directory.Delete(fixture, true); }
+        } finally { TestPaths.DeleteFixture(fixture); }
     }
 
     public void RejectsChangedPreviewAndUnrecognisedInstalledPack() {
@@ -124,7 +124,7 @@ public sealed class BedrockPackInspectorTests {
             } catch (InvalidDataException) { }
             Check(Directory.GetDirectories(category).Length == 1, "unexpected package installed");
             Check(!Directory.GetDirectories(rootPath, ".pcl-addon-stage-*").Any(), "unexpected stage created");
-        } finally { Directory.Delete(fixture, true); }
+        } finally { TestPaths.DeleteFixture(fixture); }
     }
 
     public void PreparesArchiveAndDetectsLaterChanges() {
@@ -147,7 +147,7 @@ public sealed class BedrockPackInspectorTests {
                 BedrockDirectoryInstaller.Install(new BedrockDataRoot(root, "fixture"), prepared.Directory, prepared.Preview);
                 throw new Exception("changed preparation accepted");
             } catch (InvalidDataException) { }
-        } finally { Directory.Delete(fixture, true); }
+        } finally { TestPaths.DeleteFixture(fixture); }
     }
 
     public void RejectsArchiveOutsidePackDirectory() {
@@ -165,7 +165,7 @@ public sealed class BedrockPackInspectorTests {
                 throw new Exception("unrelated file accepted");
             } catch (InvalidDataException) { }
             Check(!Directory.GetDirectories(fixture, "pcl-pack-preparation-*").Any(), "invalid archive produced a stage");
-        } finally { Directory.Delete(fixture, true); }
+        } finally { TestPaths.DeleteFixture(fixture); }
     }
 
     public void PreparesMultiPackAddonWithoutInstalling() {
@@ -189,7 +189,7 @@ public sealed class BedrockPackInspectorTests {
                 "multiple package members missing");
             Check(addon.Packs.Any(p => File.Exists(Path.Combine(p.Directory, "textures", "a.txt"))), "folder member content missing");
             Check(!Directory.Exists(Path.Combine(fixture, "resource_packs")), "preparation modified game data");
-        } finally { Directory.Delete(fixture, true); }
+        } finally { TestPaths.DeleteFixture(fixture); }
     }
 
     public void RejectsAddonWithAmbiguousFiles() {
@@ -207,7 +207,7 @@ public sealed class BedrockPackInspectorTests {
                 throw new Exception("ambiguous addon accepted");
             } catch (InvalidDataException) { }
             Check(!Directory.GetDirectories(fixture, "pcl-addon-preparation-*").Any(), "invalid addon produced a stage");
-        } finally { Directory.Delete(fixture, true); }
+        } finally { TestPaths.DeleteFixture(fixture); }
     }
 
     public void CommitsAndRollsBackMultiPackTransaction() {
@@ -232,7 +232,7 @@ public sealed class BedrockPackInspectorTests {
             BedrockAddonTransaction.Rollback(root, transaction);
             Check(Directory.GetDirectories(category).Length == 0 && Directory.Exists(Path.Combine(transaction, "pack-0")) &&
                 Directory.Exists(Path.Combine(transaction, "pack-1")), "rollback did not preserve both packages");
-        } finally { Directory.Delete(fixture, true); }
+        } finally { TestPaths.DeleteFixture(fixture); }
     }
 
     public void RecoversInterruptedTransactionAndRefusesChangedContent() {
@@ -261,7 +261,7 @@ public sealed class BedrockPackInspectorTests {
             Check(!Directory.Exists(destination) && Directory.Exists(Path.Combine(transaction, "pack-0")) &&
                 Directory.Exists(Path.Combine(transaction, "pack-1")), "interrupted transaction was not recovered");
             BedrockAddonTransaction.Rollback(root, transaction); // Recovery can be retried.
-        } finally { Directory.Delete(fixture, true); }
+        } finally { TestPaths.DeleteFixture(fixture); }
     }
 
     public void RejectsTamperedTransactionJournal() {
@@ -281,7 +281,7 @@ public sealed class BedrockPackInspectorTests {
             } catch (InvalidDataException) { }
             Check(Directory.GetDirectories(category).Length == 0 && Directory.Exists(Path.Combine(transaction, "pack-0")),
                 "tampered transaction modified installed packs");
-        } finally { Directory.Delete(fixture, true); }
+        } finally { TestPaths.DeleteFixture(fixture); }
     }
 
     public void RemovesAndRestoresVersionedPackWithExternalBackup() {
@@ -301,7 +301,7 @@ public sealed class BedrockPackInspectorTests {
             Check(BedrockAddonRemoval.Restore(root, removal.TransactionPath, [root]) == pack, "original location not restored");
             Check(BedrockAddonRemoval.List(root).Single().State == "原位置存在", "restored removal state not reported");
             Check(File.ReadAllText(Path.Combine(pack, "data.txt")) == "user data" && Directory.Exists(removal.BackupPath), "restore lost data");
-        } finally { Directory.Delete(fixture, true); }
+        } finally { TestPaths.DeleteFixture(fixture); }
     }
 
     public void RefusesRestorationOverExistingOrModifiedPack() {
@@ -330,7 +330,7 @@ public sealed class BedrockPackInspectorTests {
             try { BedrockAddonRemoval.Restore(root, removal.TransactionPath, [root]); throw new Exception("changed quarantine accepted"); }
             catch (InvalidDataException) { }
             Check(File.Exists(Path.Combine(content, "extra.txt")) && Directory.Exists(removal.BackupPath), "changed or backup data lost");
-        } finally { Directory.Delete(fixture, true); }
+        } finally { TestPaths.DeleteFixture(fixture); }
     }
 
     public void RejectsChangedRemovalAndTamperedRemovalJournal() {
@@ -353,7 +353,7 @@ public sealed class BedrockPackInspectorTests {
             try { BedrockAddonRemoval.Restore(root, removal.TransactionPath, [root]); throw new Exception("tampered journal accepted"); }
             catch (InvalidDataException) { }
             Check(Directory.Exists(Path.Combine(removal.TransactionPath, "content")) && Directory.Exists(removal.BackupPath), "tampered journal lost data");
-        } finally { Directory.Delete(fixture, true); }
+        } finally { TestPaths.DeleteFixture(fixture); }
     }
 
     public void RefusesRemovalWhenAccountWorldReferencesSharedPack() {
@@ -382,7 +382,7 @@ public sealed class BedrockPackInspectorTests {
                 throw new Exception("incomplete world scan accepted");
             } catch (InvalidDataException) { }
             Check(Directory.Exists(pack), "pack changed after incomplete scan");
-        } finally { Directory.Delete(fixture, true); }
+        } finally { TestPaths.DeleteFixture(fixture); }
     }
 
     public void ChecksConflictsAcrossExplicitRootsAndReportsIncompleteScan() {
@@ -403,7 +403,7 @@ public sealed class BedrockPackInspectorTests {
             Check(result.Complete && result.Conflicts.Count == 1, "complete cross-root scan failed");
             try { BedrockAddonScope.Check([first, first], [uuid]); throw new Exception("duplicate roots accepted"); }
             catch (InvalidDataException) { }
-        } finally { Directory.Delete(fixture, true); }
+        } finally { TestPaths.DeleteFixture(fixture); }
     }
 
     public void ChecksDependenciesAcrossRootsWithoutClaimingWorldActivation() {
@@ -423,7 +423,7 @@ public sealed class BedrockPackInspectorTests {
             Check(BedrockDependencyCheck.Analyze(wrongVersion, roots).Results.Single().Status.Contains("未发现声明版本"), "version mismatch missed");
             Directory.CreateDirectory(Path.Combine(first, "behavior_packs", "unreadable"));
             Check(BedrockDependencyCheck.Analyze(wrongVersion, roots).Results.Single().Status.Contains("无法确认"), "incomplete scan was not reported");
-        } finally { Directory.Delete(fixture, true); }
+        } finally { TestPaths.DeleteFixture(fixture); }
     }
 
     public void TransactionRechecksCrossRootScopeBeforeCommit() {
@@ -448,7 +448,7 @@ public sealed class BedrockPackInspectorTests {
             File.Delete(Path.Combine(duplicate, "manifest.json")); Directory.Delete(duplicate);
             BedrockAddonTransaction.Commit(root, transaction, [sharedRoot, root]);
             BedrockAddonTransaction.Rollback(root, transaction);
-        } finally { Directory.Delete(fixture, true); }
+        } finally { TestPaths.DeleteFixture(fixture); }
     }
 
     public void LegacyTransactionCanBeRecoveredButNotCommitted() {
@@ -471,7 +471,7 @@ public sealed class BedrockPackInspectorTests {
             Directory.Move(Path.Combine(transaction, "pack-0"), destination);
             BedrockAddonTransaction.Rollback(root, transaction);
             Check(Directory.Exists(Path.Combine(transaction, "pack-0")) && !Directory.Exists(destination), "legacy recovery failed");
-        } finally { Directory.Delete(fixture, true); }
+        } finally { TestPaths.DeleteFixture(fixture); }
     }
 
     public void PreparesArchiveThenInstallsAndRecoversIt() {
@@ -495,7 +495,7 @@ public sealed class BedrockPackInspectorTests {
             BedrockAddonTransaction.Rollback(root, transaction);
             Check(!Directory.Exists(installed.Path) && File.Exists(Path.Combine(transaction, "pack-0", "manifest.json")),
                 "installed archive was not recovered");
-        } finally { Directory.Delete(fixture, true); }
+        } finally { TestPaths.DeleteFixture(fixture); }
     }
 
     private static void Add(ZipArchive zip, string name, string text) {

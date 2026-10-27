@@ -24,7 +24,7 @@ public sealed class BedrockWorldReaderTests {
 
     public void CreatesAndVerifiesBackupWithoutChangingWorld() => WithWorld((temp, root, world) => {
         string source = Path.Combine(world, "level.dat");
-        string backup = temp + ".zip";
+        string backup = Path.Combine(temp, "backup.zip");
         File.WriteAllText(source, "original data");
         try {
             var info = new BedrockWorldInfo(world, "Test world", true, [], [], null);
@@ -44,7 +44,7 @@ public sealed class BedrockWorldReaderTests {
 
     public void BacksUpHighlyCompressibleWorldData() => WithWorld((temp, root, world) => {
         string source = Path.Combine(world, "level.dat");
-        string backup = temp + ".zip";
+        string backup = Path.Combine(temp, "backup.zip");
         File.WriteAllText(source, new string('A', 2 * 1024 * 1024));
         try {
             var info = BedrockWorldBackup.Create(new BedrockDataRoot(root, "fixture"),
@@ -55,7 +55,7 @@ public sealed class BedrockWorldReaderTests {
     });
 
     public void PreservesPartialBackupWhenWorldCannotBeBackedUp() {
-        string fixture = Path.Combine(Path.GetTempPath(), "pcl-b-" + Guid.NewGuid().ToString("N").Substring(0, 8));
+        string fixture = Path.Combine(Path.GetTempPath(), "pcl-b-" + Guid.NewGuid().ToString("N"));
         string root = Path.Combine(fixture, "g"), world = Path.Combine(root, "minecraftWorlds", "w");
         Directory.CreateDirectory(world);
         try {
@@ -70,7 +70,7 @@ public sealed class BedrockWorldReaderTests {
             Check(!File.Exists(output) && Directory.GetFiles(fixture, "backup.zip.partial-*").Length == 1,
                 "partial backup was not preserved");
             Check(File.ReadAllText(Path.Combine(world, "level.dat")) == "fixture", "source world changed");
-        } finally { Directory.Delete(fixture, true); }
+        } finally { TestPaths.DeleteFixture(fixture); }
     }
 
     public void RejectsBackupInsideGameData() => WithWorld((_, root, world) => {
@@ -83,7 +83,7 @@ public sealed class BedrockWorldReaderTests {
 
     public void RefusesToOverwriteExistingBackup() => WithWorld((temp, root, world) => {
         File.WriteAllText(Path.Combine(world, "level.dat"), "fixture");
-        string backup = temp + ".zip";
+        string backup = Path.Combine(temp, "backup.zip");
         File.WriteAllText(backup, "existing backup");
         try {
             var info = new BedrockWorldInfo(world, "Test", true, [], [], null);
@@ -94,7 +94,7 @@ public sealed class BedrockWorldReaderTests {
 
     public void RestoresAsNewWithoutOverwritingOriginal() => WithWorld((temp, root, world) => {
         string source = Path.Combine(world, "level.dat");
-        string backup = temp + ".zip";
+        string backup = Path.Combine(temp, "backup.zip");
         string? restored = null;
         File.WriteAllText(source, "saved state");
         string db = Path.Combine(world, "db");
@@ -127,7 +127,7 @@ public sealed class BedrockWorldReaderTests {
     });
 
     public void RejectsCorruptRestoreBeforeCreatingWorld() => WithWorld((temp, root, world) => {
-        string backup = temp + ".zip";
+        string backup = Path.Combine(temp, "backup.zip");
         File.WriteAllText(Path.Combine(world, "level.dat"), "fixture");
         try {
             var dataRoot = new BedrockDataRoot(root, "fixture");
@@ -142,6 +142,29 @@ public sealed class BedrockWorldReaderTests {
             Check(Directory.GetDirectories(root, ".pcl-restore-*").Length == 0, "unexpected staging directory created");
         } finally { File.Delete(backup); }
     });
+
+    public void PreservesStagedFilesWhenRestoreFails() {
+        string fixture = Path.Combine(Path.GetTempPath(), "pcl-world-restore-failure-" + Guid.NewGuid().ToString("N"));
+        string root = Path.Combine(fixture, "game"), worlds = Path.Combine(root, "minecraftWorlds"), world = Path.Combine(worlds, "original"), backup = Path.Combine(fixture, "backup.zip");
+        Directory.CreateDirectory(world);
+        try {
+            File.WriteAllText(Path.Combine(world, "level.dat"), "fixture");
+            var rootInfo = new BedrockDataRoot(root, "fixture");
+            BedrockWorldBackup.Create(rootInfo, new BedrockWorldInfo(world, "fixture", true, [], [], null), backup);
+            try {
+                BedrockWorldBackup.RestoreAsNew(rootInfo, backup, stage => {
+                    File.WriteAllText(Path.Combine(stage, "external-change.txt"), "keep");
+                    throw new IOException("simulated failure before commit");
+                });
+                throw new Exception("injected restore failure did not occur");
+            }
+            catch (IOException ex) { Check(ex.Message.Contains("临时目录"), "failure did not report stage"); }
+            string stage = Directory.GetDirectories(root, ".pcl-restore-*").Single();
+            Check(File.ReadAllText(Path.Combine(stage, "level.dat")) == "fixture" &&
+                File.ReadAllText(Path.Combine(stage, "external-change.txt")) == "keep", "staged or externally changed data was deleted");
+            Check(Directory.EnumerateDirectories(worlds).Single() == world, "failed restore installed a world");
+        } finally { TestPaths.DeleteFixture(fixture); }
+    }
 
     public void RejectsSharedRootForWorldOperations() => WithWorld((_, root, world) => {
         File.WriteAllText(Path.Combine(world, "level.dat"), "fixture");
