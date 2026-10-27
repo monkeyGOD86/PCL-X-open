@@ -295,7 +295,7 @@ Public Class PageBedrockRight
             LabAddonDetails.Text = Addon.Error
         Else
             Dim Pack = Addon.Manifest
-            LabAddonDetails.Text = $"{Pack.Name}　{Pack.Version}" & vbCrLf & $"UUID：{Pack.Uuid}　类型：{String.Join(", ", Pack.Modules)}" & vbCrLf &
+            LabAddonDetails.Text = $"清单名称：{Pack.Name}（可能为本地化键）　版本：{Pack.Version}" & vbCrLf & $"UUID：{Pack.Uuid}　类型：{String.Join(", ", Pack.Modules)}" & vbCrLf &
                                    If(Pack.Modules.Contains("resources"), "资源包使用范围：" & Pack.PackScope & vbCrLf, "") &
                                    If(Pack.Dependencies.Count = 0, "", "依赖：" & String.Join(", ", Pack.Dependencies) & vbCrLf) &
                                    If(Addon.Warnings.Count = 0, "", "提示：" & String.Join("；", Addon.Warnings))
@@ -503,7 +503,7 @@ Public Class PageBedrockRight
         Dim Choice = TryCast(TryCast(ComboWorldAddons.SelectedItem, MyComboBoxItem)?.Tag, WorldAddonChoice)
         If Choice IsNot Nothing Then
             Dim Pack = Choice.Addon.Manifest
-            LabWorldAddonStatus.Text = $"{Pack.Name}　{Pack.Version}" & vbCrLf & $"UUID：{Pack.Uuid}　类型：{String.Join(", ", Pack.Modules)}" & vbCrLf &
+            LabWorldAddonStatus.Text = $"清单名称：{Pack.Name}（可能为本地化键）　版本：{Pack.Version}" & vbCrLf & $"UUID：{Pack.Uuid}　类型：{String.Join(", ", Pack.Modules)}" & vbCrLf &
                                        If(Pack.Modules.Contains("resources"), "资源包使用范围：" & Pack.PackScope & vbCrLf, "") &
                                        "包目录：" & Choice.Addon.Path
         End If
@@ -947,7 +947,9 @@ Public Class PageBedrockRight
     Private Shared Function DescribePacks(Packs As IEnumerable(Of BedrockPackInfo)) As String
         Dim Lines As New List(Of String)
         For Each Pack In Packs
-            Lines.Add($"{Pack.Name}　{Pack.Version}" & vbCrLf &
+            Dim Description = If(Pack.Description.Length > 300, Pack.Description.Substring(0, 300) & "…", Pack.Description)
+            Lines.Add($"清单名称：{Pack.Name}（可能为本地化键）　版本：{Pack.Version}" & vbCrLf &
+                      If(Description.Length = 0, "", "清单描述：" & Description & "（可能为本地化键）" & vbCrLf) &
                       $"UUID：{Pack.Uuid}　类型：{String.Join(", ", Pack.Modules)}" & vbCrLf &
                       If(Pack.Modules.Contains("resources"), "资源包使用范围：" & Pack.PackScope & vbCrLf, "") &
                       If(Pack.Dependencies.Count > 0, "依赖：" & String.Join(", ", Pack.Dependencies) & vbCrLf, "") &
