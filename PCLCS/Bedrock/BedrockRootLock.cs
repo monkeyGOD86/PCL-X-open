@@ -26,6 +26,23 @@ internal sealed class BedrockRootLock : IDisposable {
         }
     }
 
+    public static IDisposable AcquireAll(IEnumerable<string> roots) {
+        var locks = new List<BedrockRootLock>();
+        try {
+            foreach (string root in roots.OrderBy(path => path, StringComparer.OrdinalIgnoreCase)) locks.Add(Acquire(root));
+            return new LockSet(locks);
+        } catch {
+            for (int i = locks.Count - 1; i >= 0; i--) locks[i].Dispose();
+            throw;
+        }
+    }
+
+    private sealed class LockSet(List<BedrockRootLock> locks) : IDisposable {
+        public void Dispose() {
+            for (int i = locks.Count - 1; i >= 0; i--) locks[i].Dispose();
+        }
+    }
+
     public void Dispose() {
         mutex.ReleaseMutex();
         mutex.Dispose();

@@ -25,7 +25,7 @@ public static class BedrockAddonTransaction {
         foreach (string candidate in Directory.EnumerateDirectories(rootPath, Prefix + "*")) {
             if (result.Count >= 1024) throw new InvalidDataException("事务目录数量超过读取限制。");
             try {
-                var (path, id, records) = ReadJournal(rootPath, candidate);
+                var (path, id, records, _) = ReadJournal(rootPath, candidate);
                 int staged = 0, installed = 0, missing = 0;
                 bool ambiguous = false;
                 for (int i = 0; i < records.Count; i++) {
@@ -48,23 +48,23 @@ public static class BedrockAddonTransaction {
         return result;
     }
 
-    public static string Prepare(BedrockDataRoot root, IReadOnlyList<BedrockPreparedPack> packs) {
+    public static string Prepare(BedrockDataRoot root, IReadOnlyList<BedrockPreparedPack> packs, IReadOnlyList<BedrockDataRoot> scope) {
         if (packs.Count is < 1 or > 16) throw new InvalidDataException("每次事务只能准备 1 至 16 个包。");
         string rootPath = NormalizeRoot(root);
-        using var rootLock = BedrockRootLock.Acquire(rootPath);
-        var catalog = BedrockAddonCatalog.Read(root);
-        if (catalog.Any(item => item.Manifest is null)) throw new InvalidDataException("现有包无法全部识别，无法检查冲突。");
+        string[] scopePaths = NormalizeScope(rootPath, scope);
+        using var rootLock = BedrockRootLock.AcquireAll(scopePaths);
         if (packs.GroupBy(pack => pack.Preview.Pack.Uuid).Any(group => group.Count() > 1))
             throw new InvalidDataException("待安装包包含重复 UUID。");
+        RequireNoConflicts(scope, packs.Select(pack => pack.Preview.Pack.Uuid));
         var records = new JArray();
         for (int i = 0; i < packs.Count; i++) {
             var pack = packs[i];
             string source = Path.GetFullPath(pack.Directory).TrimEnd(Path.DirectorySeparatorChar);
-            if (Contains(rootPath, source) || Contains(source, rootPath)) throw new InvalidDataException("来源和目标目录不能相互包含。");
+            if (scopePaths.Any(path => Contains(path, source) || Contains(source, path)))
+                throw new InvalidDataException("来源和检查范围中的游戏数据目录不能相互包含。");
             var current = BedrockDirectoryInstaller.Preview(source);
             if (current.Fingerprint != pack.Preview.Fingerprint || current.Pack.Uuid != pack.Preview.Pack.Uuid ||
                 current.Pack.Version != pack.Preview.Pack.Version) throw new InvalidDataException("包内容已变化，请重新预览。");
-            if (catalog.Any(item => item.Manifest!.Uuid == current.Pack.Uuid)) throw new InvalidDataException("目标中存在相同 UUID 的包。");
             bool resource = current.Pack.Modules.Contains("resources"), behavior = current.Pack.Modules.Contains("data");
             if (resource == behavior) throw new InvalidDataException("无法确定唯一的附加包类型。");
             string category = resource ? "resource_packs" : "behavior_packs";
@@ -81,7 +81,7 @@ public static class BedrockAddonTransaction {
         try {
             Directory.CreateDirectory(transaction);
             created = true;
-            var journal = new JObject { ["schemaVersion"] = 1, ["id"] = id, ["packs"] = records };
+            var journal = new JObject { ["schemaVersion"] = 2, ["id"] = id, ["packs"] = records, ["scope"] = new JArray(scopePaths) };
             using (var file = new FileStream(Path.Combine(transaction, JournalName), FileMode.CreateNew, FileAccess.Write, FileShare.None)) {
                 byte[] bytes = Encoding.UTF8.GetBytes(journal.ToString(Formatting.None));
                 file.Write(bytes, 0, bytes.Length);
@@ -100,16 +100,16 @@ public static class BedrockAddonTransaction {
         }
     }
 
-    public static void Commit(BedrockDataRoot root, string transaction) {
+    public static void Commit(BedrockDataRoot root, string transaction, IReadOnlyList<BedrockDataRoot> scope) {
         string rootPath = NormalizeRoot(root);
-        using var rootLock = BedrockRootLock.Acquire(rootPath);
-        var (path, id, records) = ReadJournal(rootPath, transaction);
-        var catalog = BedrockAddonCatalog.Read(root);
-        if (catalog.Any(item => item.Manifest is null)) throw new InvalidDataException("现有包无法全部识别，无法检查冲突。");
+        string[] scopePaths = NormalizeScope(rootPath, scope);
+        using var rootLock = BedrockRootLock.AcquireAll(scopePaths);
+        var (path, id, records, recordedScope) = ReadJournal(rootPath, transaction);
+        if (recordedScope is null || !scopePaths.SequenceEqual(recordedScope, StringComparer.OrdinalIgnoreCase))
+            throw new InvalidDataException("检查目录与准备事务时不同，请重新准备；旧事务仍可恢复。");
+        RequireNoConflicts(scope, records.Cast<JObject>().Select(record => Guid.Parse(record.Value<string>("uuid")!)));
         for (int i = 0; i < records.Count; i++) {
             var record = (JObject)records[i];
-            if (catalog.Any(item => item.Manifest!.Uuid == Guid.Parse(record.Value<string>("uuid")!)))
-                throw new InvalidDataException("目标中存在相同 UUID 的包。");
             string parent = Path.Combine(rootPath, record.Value<string>("category")!);
             BedrockDataRootFinder.EnsureNoReparsePoints(parent);
             string destination = Destination(rootPath, id, i, record);
@@ -136,7 +136,7 @@ public static class BedrockAddonTransaction {
     public static void Rollback(BedrockDataRoot root, string transaction) {
         string rootPath = NormalizeRoot(root);
         using var rootLock = BedrockRootLock.Acquire(rootPath);
-        var (path, id, records) = ReadJournal(rootPath, transaction);
+        var (path, id, records, _) = ReadJournal(rootPath, transaction);
         var toMove = new List<(string From, string To, JObject Record)>();
         for (int i = 0; i < records.Count; i++) {
             var record = (JObject)records[i];
@@ -160,7 +160,7 @@ public static class BedrockAddonTransaction {
         }
     }
 
-    private static (string Path, string Id, JArray Records) ReadJournal(string rootPath, string transaction) {
+    private static (string Path, string Id, JArray Records, string[]? Scope) ReadJournal(string rootPath, string transaction) {
         string path = Path.GetFullPath(transaction).TrimEnd(Path.DirectorySeparatorChar);
         string name = Path.GetFileName(path);
         if (!string.Equals(Path.GetDirectoryName(path), rootPath, StringComparison.OrdinalIgnoreCase) ||
@@ -175,9 +175,21 @@ public static class BedrockAddonTransaction {
         using var json = new JsonTextReader(reader) { MaxDepth = 8, DateParseHandling = DateParseHandling.None };
         var journal = JObject.Load(json, new JsonLoadSettings { DuplicatePropertyNameHandling = DuplicatePropertyNameHandling.Error });
         string id = name.Substring(Prefix.Length);
-        if (json.Read() || journal.Value<int?>("schemaVersion") != 1 || journal.Value<string>("id") != id ||
+        int? schema = journal.Value<int?>("schemaVersion");
+        if (json.Read() || schema is not (1 or 2) || journal.Value<string>("id") != id ||
             journal["packs"] is not JArray records || records.Count is < 1 or > 16)
             throw new InvalidDataException("事务记录无效。");
+        string[]? scope = null;
+        if (schema == 2) {
+            if (journal["scope"] is not JArray scopeArray || scopeArray.Count is < 1 or > 128 ||
+                scopeArray.Any(item => item.Type != JTokenType.String)) throw new InvalidDataException("事务检查范围无效。");
+            scope = scopeArray.Select(item => item.Value<string>()!).ToArray();
+            if (scope.Any(item => !Path.IsPathRooted(item) || !string.Equals(item, Path.GetFullPath(item).TrimEnd(Path.DirectorySeparatorChar), StringComparison.OrdinalIgnoreCase)) ||
+                scope.Distinct(StringComparer.OrdinalIgnoreCase).Count() != scope.Length ||
+                !scope.Contains(rootPath, StringComparer.OrdinalIgnoreCase) ||
+                !scope.SequenceEqual(scope.OrderBy(item => item, StringComparer.OrdinalIgnoreCase), StringComparer.OrdinalIgnoreCase))
+                throw new InvalidDataException("事务检查范围无效。");
+        }
         var ids = new HashSet<Guid>();
         foreach (var token in records) {
             if (token is not JObject record || record.Value<string>("category") is not ("resource_packs" or "behavior_packs") ||
@@ -186,7 +198,21 @@ public static class BedrockAddonTransaction {
                 !System.Text.RegularExpressions.Regex.IsMatch(record.Value<string>("fingerprint") ?? "", "^[0-9A-F]{64}$"))
                 throw new InvalidDataException("事务记录中的包无效。");
         }
-        return (path, id, records);
+        return (path, id, records, scope);
+    }
+
+    private static string[] NormalizeScope(string rootPath, IReadOnlyList<BedrockDataRoot> scope) {
+        if (scope.Count is < 1 or > 128) throw new InvalidDataException("附加包检查目录数量无效。");
+        string[] paths = scope.Select(NormalizeRoot).OrderBy(path => path, StringComparer.OrdinalIgnoreCase).ToArray();
+        if (paths.Distinct(StringComparer.OrdinalIgnoreCase).Count() != paths.Length || !paths.Contains(rootPath, StringComparer.OrdinalIgnoreCase))
+            throw new InvalidDataException("检查范围必须包含所选目标且不能重复。");
+        return paths;
+    }
+
+    private static void RequireNoConflicts(IReadOnlyList<BedrockDataRoot> scope, IEnumerable<Guid> ids) {
+        var result = BedrockAddonScope.Check(scope, ids);
+        if (!result.Complete) throw new InvalidDataException("部分数据目录中的包无法识别，不能安全检查冲突。");
+        if (result.Conflicts.Count > 0) throw new InvalidDataException("检查范围中已存在相同 UUID 的附加包。");
     }
 
     private static void Verify(string directory, JObject record) {

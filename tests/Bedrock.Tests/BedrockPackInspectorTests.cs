@@ -216,10 +216,10 @@ public sealed class BedrockPackInspectorTests {
             var packs = new[] { new BedrockPreparedPack(first, BedrockDirectoryInstaller.Preview(first)),
                 new BedrockPreparedPack(second, BedrockDirectoryInstaller.Preview(second)) };
             var root = new BedrockDataRoot(game, "fixture");
-            string transaction = BedrockAddonTransaction.Prepare(root, packs);
+            string transaction = BedrockAddonTransaction.Prepare(root, packs, [root]);
             Check(Directory.GetDirectories(category).Length == 0, "prepare installed a package");
             Check(BedrockAddonTransaction.List(root).Single().State == "已暂存", "prepared transaction not reported");
-            BedrockAddonTransaction.Commit(root, transaction);
+            BedrockAddonTransaction.Commit(root, transaction, [root]);
             Check(Directory.GetDirectories(category).Length == 2, "transaction did not install both packages");
             Check(BedrockAddonTransaction.List(root).Single().State == "已移动", "committed transaction not reported");
             BedrockAddonTransaction.Rollback(root, transaction);
@@ -238,7 +238,7 @@ public sealed class BedrockPackInspectorTests {
             File.WriteAllText(Path.Combine(second, "manifest.json"), Manifest.Replace("11111111-1111-4111-8111-111111111111", "33333333-3333-4333-8333-333333333333"));
             var root = new BedrockDataRoot(game, "fixture");
             string transaction = BedrockAddonTransaction.Prepare(root, [new BedrockPreparedPack(source, BedrockDirectoryInstaller.Preview(source)),
-                new BedrockPreparedPack(second, BedrockDirectoryInstaller.Preview(second))]);
+                new BedrockPreparedPack(second, BedrockDirectoryInstaller.Preview(second))], [root]);
             string id = Path.GetFileName(transaction).Substring(".pcl-addon-transaction-".Length);
             string destination = Path.Combine(category, "pcl-" + id + "-0");
             Directory.Move(Path.Combine(transaction, "pack-0"), destination); // Simulate interruption after one move.
@@ -264,12 +264,12 @@ public sealed class BedrockPackInspectorTests {
         try {
             File.WriteAllText(Path.Combine(source, "manifest.json"), Manifest);
             var root = new BedrockDataRoot(game, "fixture");
-            string transaction = BedrockAddonTransaction.Prepare(root, [new BedrockPreparedPack(source, BedrockDirectoryInstaller.Preview(source))]);
+            string transaction = BedrockAddonTransaction.Prepare(root, [new BedrockPreparedPack(source, BedrockDirectoryInstaller.Preview(source))], [root]);
             string journal = Path.Combine(transaction, "journal.json");
             File.WriteAllText(journal, File.ReadAllText(journal).Replace("resource_packs", "../outside"));
             Check(BedrockAddonTransaction.List(root).Single().State == "记录不可读取", "damaged journal not reported");
             try {
-                BedrockAddonTransaction.Commit(root, transaction);
+                BedrockAddonTransaction.Commit(root, transaction, [root]);
                 throw new Exception("tampered journal accepted");
             } catch (InvalidDataException) { }
             Check(Directory.GetDirectories(category).Length == 0 && Directory.Exists(Path.Combine(transaction, "pack-0")),
@@ -335,6 +335,75 @@ public sealed class BedrockPackInspectorTests {
             try { BedrockAddonRemoval.Restore(root, removal.TransactionPath); throw new Exception("tampered journal accepted"); }
             catch (InvalidDataException) { }
             Check(Directory.Exists(Path.Combine(removal.TransactionPath, "content")) && Directory.Exists(removal.BackupPath), "tampered journal lost data");
+        } finally { Directory.Delete(fixture, true); }
+    }
+
+    public void ChecksConflictsAcrossExplicitRootsAndReportsIncompleteScan() {
+        string fixture = Path.Combine(Path.GetTempPath(), "pcl-bedrock-scope-test-" + Guid.NewGuid().ToString("N"));
+        string account = Path.Combine(fixture, "account"), shared = Path.Combine(fixture, "shared");
+        string pack = Path.Combine(shared, "resource_packs", "existing"), unknown = Path.Combine(account, "behavior_packs", "unknown");
+        Directory.CreateDirectory(pack); Directory.CreateDirectory(unknown);
+        try {
+            File.WriteAllText(Path.Combine(pack, "manifest.json"), Manifest);
+            var first = new BedrockDataRoot(account, "account");
+            var second = new BedrockDataRoot(shared, "shared", false);
+            Guid uuid = Guid.Parse("11111111-1111-4111-8111-111111111111");
+            var result = BedrockAddonScope.Check([first, second], [uuid]);
+            Check(result.Conflicts.Count == 1 && result.Conflicts[0].Root.Path == shared, "shared-root conflict missing");
+            Check(!result.Complete && result.IncompleteRoots.Single() == account, "incomplete scan not reported");
+            Directory.Delete(unknown);
+            result = BedrockAddonScope.Check([first, second], [uuid]);
+            Check(result.Complete && result.Conflicts.Count == 1, "complete cross-root scan failed");
+            try { BedrockAddonScope.Check([first, first], [uuid]); throw new Exception("duplicate roots accepted"); }
+            catch (InvalidDataException) { }
+        } finally { Directory.Delete(fixture, true); }
+    }
+
+    public void TransactionRechecksCrossRootScopeBeforeCommit() {
+        string fixture = Path.Combine(Path.GetTempPath(), "pcl-bedrock-scope-transaction-test-" + Guid.NewGuid().ToString("N"));
+        string account = Path.Combine(fixture, "account"), shared = Path.Combine(fixture, "shared"), source = Path.Combine(fixture, "source");
+        Directory.CreateDirectory(Path.Combine(account, "resource_packs"));
+        Directory.CreateDirectory(Path.Combine(shared, "resource_packs"));
+        Directory.CreateDirectory(source);
+        try {
+            File.WriteAllText(Path.Combine(source, "manifest.json"), Manifest);
+            var root = new BedrockDataRoot(account, "account");
+            var sharedRoot = new BedrockDataRoot(shared, "shared", false);
+            var packs = new[] { new BedrockPreparedPack(source, BedrockDirectoryInstaller.Preview(source)) };
+            string transaction = BedrockAddonTransaction.Prepare(root, packs, [root, sharedRoot]);
+            try { BedrockAddonTransaction.Commit(root, transaction, [root]); throw new Exception("changed scope accepted"); }
+            catch (InvalidDataException) { }
+            string duplicate = Path.Combine(shared, "resource_packs", "duplicate");
+            Directory.CreateDirectory(duplicate); File.WriteAllText(Path.Combine(duplicate, "manifest.json"), Manifest);
+            try { BedrockAddonTransaction.Commit(root, transaction, [sharedRoot, root]); throw new Exception("new shared conflict accepted"); }
+            catch (InvalidDataException) { }
+            Check(Directory.GetDirectories(Path.Combine(account, "resource_packs")).Length == 0, "conflict caused an install");
+            File.Delete(Path.Combine(duplicate, "manifest.json")); Directory.Delete(duplicate);
+            BedrockAddonTransaction.Commit(root, transaction, [sharedRoot, root]);
+            BedrockAddonTransaction.Rollback(root, transaction);
+        } finally { Directory.Delete(fixture, true); }
+    }
+
+    public void LegacyTransactionCanBeRecoveredButNotCommitted() {
+        string fixture = Path.Combine(Path.GetTempPath(), "pcl-bedrock-legacy-transaction-test-" + Guid.NewGuid().ToString("N"));
+        string game = Path.Combine(fixture, "game"), source = Path.Combine(fixture, "source"), category = Path.Combine(game, "resource_packs");
+        Directory.CreateDirectory(category); Directory.CreateDirectory(source);
+        try {
+            File.WriteAllText(Path.Combine(source, "manifest.json"), Manifest);
+            var root = new BedrockDataRoot(game, "fixture");
+            string transaction = BedrockAddonTransaction.Prepare(root, [new BedrockPreparedPack(source, BedrockDirectoryInstaller.Preview(source))], [root]);
+            string journal = Path.Combine(transaction, "journal.json");
+            string legacy = System.Text.RegularExpressions.Regex.Replace(File.ReadAllText(journal), ",\"scope\":\\[.*?\\]", "")
+                .Replace("\"schemaVersion\":2", "\"schemaVersion\":1");
+            File.WriteAllText(journal, legacy);
+            Check(BedrockAddonTransaction.List(root).Single().State == "已暂存", "legacy transaction not readable");
+            try { BedrockAddonTransaction.Commit(root, transaction, [root]); throw new Exception("legacy transaction committed"); }
+            catch (InvalidDataException) { }
+            string id = Path.GetFileName(transaction).Substring(".pcl-addon-transaction-".Length);
+            string destination = Path.Combine(category, "pcl-" + id + "-0");
+            Directory.Move(Path.Combine(transaction, "pack-0"), destination);
+            BedrockAddonTransaction.Rollback(root, transaction);
+            Check(Directory.Exists(Path.Combine(transaction, "pack-0")) && !Directory.Exists(destination), "legacy recovery failed");
         } finally { Directory.Delete(fixture, true); }
     }
 
