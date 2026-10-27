@@ -281,6 +281,7 @@ Public Class PageBedrockRight
         Else
             Dim Pack = Addon.Manifest
             LabAddonDetails.Text = $"{Pack.Name}　{Pack.Version}" & vbCrLf & $"UUID：{Pack.Uuid}　类型：{String.Join(", ", Pack.Modules)}" & vbCrLf &
+                                   If(Pack.Modules.Contains("resources"), "资源包使用范围：" & Pack.PackScope & vbCrLf, "") &
                                    If(Pack.Dependencies.Count = 0, "", "依赖：" & String.Join(", ", Pack.Dependencies) & vbCrLf) &
                                    If(Addon.Warnings.Count = 0, "", "提示：" & String.Join("；", Addon.Warnings))
         End If
