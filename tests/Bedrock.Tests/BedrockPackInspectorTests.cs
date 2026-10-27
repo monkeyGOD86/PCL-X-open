@@ -277,6 +277,67 @@ public sealed class BedrockPackInspectorTests {
         } finally { Directory.Delete(fixture, true); }
     }
 
+    public void RemovesAndRestoresVersionedPackWithExternalBackup() {
+        string fixture = Path.Combine(Path.GetTempPath(), "pcl-bedrock-remove-test-" + Guid.NewGuid().ToString("N"));
+        string game = Path.Combine(fixture, "game"), backup = Path.Combine(fixture, "backup"),
+            pack = Path.Combine(game, "resource_packs", "package", "1.2.3");
+        Directory.CreateDirectory(pack); Directory.CreateDirectory(backup);
+        try {
+            File.WriteAllText(Path.Combine(pack, "manifest.json"), Manifest);
+            File.WriteAllText(Path.Combine(pack, "data.txt"), "user data");
+            var root = new BedrockDataRoot(game, "fixture");
+            var selected = BedrockAddonCatalog.Read(root).Single();
+            var removal = BedrockAddonRemoval.Remove(root, selected, BedrockDirectoryInstaller.Preview(pack), backup);
+            Check(!Directory.Exists(pack) && File.ReadAllText(Path.Combine(removal.BackupPath, "data.txt")) == "user data", "backup or quarantine missing");
+            Check(BedrockAddonRemoval.Restore(root, removal.TransactionPath) == pack, "original location not restored");
+            Check(File.ReadAllText(Path.Combine(pack, "data.txt")) == "user data" && Directory.Exists(removal.BackupPath), "restore lost data");
+        } finally { Directory.Delete(fixture, true); }
+    }
+
+    public void RefusesRestorationOverExistingOrModifiedPack() {
+        string fixture = Path.Combine(Path.GetTempPath(), "pcl-bedrock-remove-test-" + Guid.NewGuid().ToString("N"));
+        string game = Path.Combine(fixture, "game"), backup = Path.Combine(fixture, "backup"), pack = Path.Combine(game, "resource_packs", "package");
+        Directory.CreateDirectory(pack); Directory.CreateDirectory(backup);
+        try {
+            File.WriteAllText(Path.Combine(pack, "manifest.json"), Manifest);
+            var root = new BedrockDataRoot(game, "fixture");
+            var removal = BedrockAddonRemoval.Remove(root, BedrockAddonCatalog.Read(root).Single(), BedrockDirectoryInstaller.Preview(pack), backup);
+            Directory.CreateDirectory(pack);
+            File.WriteAllText(Path.Combine(pack, "existing.txt"), "keep");
+            try { BedrockAddonRemoval.Restore(root, removal.TransactionPath); throw new Exception("existing destination accepted"); }
+            catch (IOException) { }
+            Check(File.ReadAllText(Path.Combine(pack, "existing.txt")) == "keep", "existing destination changed");
+            File.Delete(Path.Combine(pack, "existing.txt")); Directory.Delete(pack);
+            string content = Path.Combine(removal.TransactionPath, "content");
+            File.WriteAllText(Path.Combine(content, "extra.txt"), "modified");
+            try { BedrockAddonRemoval.Restore(root, removal.TransactionPath); throw new Exception("changed quarantine accepted"); }
+            catch (InvalidDataException) { }
+            Check(File.Exists(Path.Combine(content, "extra.txt")) && Directory.Exists(removal.BackupPath), "changed or backup data lost");
+        } finally { Directory.Delete(fixture, true); }
+    }
+
+    public void RejectsChangedRemovalAndTamperedRemovalJournal() {
+        string fixture = Path.Combine(Path.GetTempPath(), "pcl-bedrock-remove-test-" + Guid.NewGuid().ToString("N"));
+        string game = Path.Combine(fixture, "game"), backup = Path.Combine(fixture, "backup"), pack = Path.Combine(game, "resource_packs", "package");
+        Directory.CreateDirectory(pack); Directory.CreateDirectory(backup);
+        try {
+            File.WriteAllText(Path.Combine(pack, "manifest.json"), Manifest);
+            var root = new BedrockDataRoot(game, "fixture");
+            var selected = BedrockAddonCatalog.Read(root).Single();
+            var preview = BedrockDirectoryInstaller.Preview(pack);
+            File.WriteAllText(Path.Combine(pack, "extra.txt"), "change");
+            try { BedrockAddonRemoval.Remove(root, selected, preview, backup); throw new Exception("changed pack accepted"); }
+            catch (InvalidDataException) { }
+            Check(Directory.Exists(pack) && !Directory.EnumerateFileSystemEntries(backup).Any(), "failed removal changed data");
+            var removal = BedrockAddonRemoval.Remove(root, selected, BedrockDirectoryInstaller.Preview(pack), backup);
+            string journal = Path.Combine(removal.TransactionPath, "journal.json");
+            File.WriteAllText(journal, File.ReadAllText(journal).Replace("resource_packs/package", "../outside"));
+            try { BedrockAddonRemoval.Restore(root, removal.TransactionPath); throw new Exception("tampered journal accepted"); }
+            catch (InvalidDataException) { }
+            Check(Directory.Exists(Path.Combine(removal.TransactionPath, "content")) && Directory.Exists(removal.BackupPath), "tampered journal lost data");
+        } finally { Directory.Delete(fixture, true); }
+    }
+
     private static void Add(ZipArchive zip, string name, string text) {
         using var writer = new StreamWriter(zip.CreateEntry(name).Open(), new UTF8Encoding(false));
         writer.Write(text);

@@ -1,0 +1,125 @@
+using System.Text;
+
+namespace PCLCS.Bedrock;
+
+public sealed class BedrockRemovedAddon(string transactionPath, string backupPath) {
+    public string TransactionPath { get; } = transactionPath;
+    public string BackupPath { get; } = backupPath;
+}
+
+/// <summary>Experimental removal by same-volume quarantine with a separate verified backup.</summary>
+public static class BedrockAddonRemoval {
+    private const string Prefix = ".pcl-addon-removal-";
+    private static readonly string[] Categories = ["resource_packs", "behavior_packs", "development_resource_packs", "development_behavior_packs"];
+
+    public static BedrockRemovedAddon Remove(BedrockDataRoot root, BedrockInstalledAddon selected,
+        BedrockDirectoryPreview confirmed, string backupParent) {
+        string rootPath = NormalizeRoot(root);
+        string source = Path.GetFullPath(selected.Path).TrimEnd(Path.DirectorySeparatorChar);
+        string relative = RelativePackPath(rootPath, source);
+        string backupRoot = Path.GetFullPath(backupParent).TrimEnd(Path.DirectorySeparatorChar);
+        if (Contains(rootPath, backupRoot)) throw new InvalidDataException("附加包备份必须位于游戏数据目录之外。");
+        BedrockDataRootFinder.EnsureNoReparsePoints(backupRoot);
+        using var rootLock = BedrockRootLock.Acquire(rootPath);
+        var match = BedrockAddonCatalog.Read(root).SingleOrDefault(item =>
+            string.Equals(Path.GetFullPath(item.Path).TrimEnd(Path.DirectorySeparatorChar), source, StringComparison.OrdinalIgnoreCase));
+        if (match?.Manifest is null) throw new InvalidDataException("所选附加包已不存在或无法识别。");
+        Verify(source, confirmed.Pack.Uuid, confirmed.Pack.Version, confirmed.Fingerprint);
+        string id = Guid.NewGuid().ToString("N");
+        string backup = Path.Combine(backupRoot, "pcl-addon-backup-" + id);
+        string transaction = Path.Combine(rootPath, Prefix + id);
+        if (Directory.Exists(backup) || File.Exists(backup) || Directory.Exists(transaction) || File.Exists(transaction))
+            throw new IOException("备份或事务目录已存在，请重试。");
+        bool started = false;
+        try {
+            Directory.CreateDirectory(backup);
+            started = true;
+            BedrockDirectoryInstaller.CopyTree(source, backup);
+            Verify(backup, confirmed.Pack.Uuid, confirmed.Pack.Version, confirmed.Fingerprint);
+            Directory.CreateDirectory(transaction);
+            var record = new JObject { ["schemaVersion"] = 1, ["id"] = id, ["relativePath"] = relative,
+                ["uuid"] = confirmed.Pack.Uuid.ToString("D"), ["version"] = confirmed.Pack.Version,
+                ["fingerprint"] = confirmed.Fingerprint, ["backupPath"] = backup };
+            using (var file = new FileStream(Path.Combine(transaction, "journal.json"), FileMode.CreateNew, FileAccess.Write, FileShare.None)) {
+                byte[] bytes = new UTF8Encoding(false).GetBytes(record.ToString(Formatting.None));
+                file.Write(bytes, 0, bytes.Length);
+                file.Flush(true);
+            }
+            Verify(source, confirmed.Pack.Uuid, confirmed.Pack.Version, confirmed.Fingerprint);
+            BedrockDataRootFinder.EnsureNoReparsePoints(transaction);
+            Directory.Move(source, Path.Combine(transaction, "content"));
+            return new(transaction, backup);
+        } catch (Exception ex) when (started) {
+            throw new IOException("附加包移除未完成或需要检查；外部备份：" + backup + "，事务目录：" + transaction, ex);
+        }
+    }
+
+    public static string Restore(BedrockDataRoot root, string transaction) {
+        string rootPath = NormalizeRoot(root);
+        using var rootLock = BedrockRootLock.Acquire(rootPath);
+        string stage = Path.GetFullPath(transaction).TrimEnd(Path.DirectorySeparatorChar);
+        string name = Path.GetFileName(stage);
+        if (!string.Equals(Path.GetDirectoryName(stage), rootPath, StringComparison.OrdinalIgnoreCase) ||
+            !name.StartsWith(Prefix, StringComparison.Ordinal) || !Guid.TryParseExact(name.Substring(Prefix.Length), "N", out _))
+            throw new InvalidDataException("移除事务目录无效。");
+        BedrockDataRootFinder.EnsureNoReparsePoints(stage);
+        string journal = Path.Combine(stage, "journal.json");
+        BedrockDataRootFinder.EnsureNoReparsePoints(journal);
+        JObject record;
+        using (var file = new FileStream(journal, FileMode.Open, FileAccess.Read, FileShare.Read)) {
+            if (file.Length > 65536) throw new InvalidDataException("事务记录过大。");
+            using var reader = new StreamReader(file, new UTF8Encoding(false, true));
+            using var json = new JsonTextReader(reader) { MaxDepth = 8, DateParseHandling = DateParseHandling.None };
+            record = JObject.Load(json, new JsonLoadSettings { DuplicatePropertyNameHandling = DuplicatePropertyNameHandling.Error });
+            if (json.Read()) throw new InvalidDataException("事务记录包含多余内容。");
+        }
+        string relative = record.Value<string>("relativePath") ?? "";
+        string destination = Path.GetFullPath(Path.Combine(rootPath, relative.Replace('/', Path.DirectorySeparatorChar)));
+        if (record.Value<int?>("schemaVersion") != 1 || record.Value<string>("id") != name.Substring(Prefix.Length) ||
+            RelativePackPath(rootPath, destination) != relative || !Guid.TryParse(record.Value<string>("uuid"), out Guid uuid) || uuid == Guid.Empty ||
+            string.IsNullOrEmpty(record.Value<string>("version")) ||
+            !System.Text.RegularExpressions.Regex.IsMatch(record.Value<string>("fingerprint") ?? "", "^[0-9A-F]{64}$"))
+            throw new InvalidDataException("移除事务记录无效。");
+        if (File.Exists(destination) || Directory.Exists(destination)) throw new IOException("原位置已被占用，不能覆盖。");
+        string parent = Path.GetDirectoryName(destination)!;
+        BedrockDataRootFinder.EnsureNoReparsePoints(parent);
+        string content = Path.Combine(stage, "content");
+        Verify(content, uuid, record.Value<string>("version")!, record.Value<string>("fingerprint")!);
+        var catalog = BedrockAddonCatalog.Read(root);
+        if (catalog.Any(item => item.Manifest is not null && item.Manifest.Uuid == uuid))
+            throw new InvalidDataException("目标中已存在相同 UUID 的包，不能自动恢复。");
+        // An emptied version-container is expected to be unrecognized after its only child is moved.
+        bool emptyVersionContainer = relative.Split('/').Length == 3 && !File.Exists(Path.Combine(parent, "manifest.json")) &&
+            !Directory.EnumerateDirectories(parent).Any();
+        if (catalog.Any(item => item.Manifest is null && !(emptyVersionContainer &&
+                string.Equals(Path.GetFullPath(item.Path), parent, StringComparison.OrdinalIgnoreCase))))
+            throw new InvalidDataException("现有包无法全部识别，无法检查冲突。");
+        BedrockDataRootFinder.EnsureNoReparsePoints(parent);
+        BedrockDataRootFinder.EnsureNoReparsePoints(content);
+        Directory.Move(content, destination);
+        return destination;
+    }
+
+    private static void Verify(string directory, Guid uuid, string version, string fingerprint) {
+        var actual = BedrockDirectoryInstaller.Preview(directory);
+        if (actual.Pack.Uuid != uuid || actual.Pack.Version != version || actual.Fingerprint != fingerprint)
+            throw new InvalidDataException("附加包内容与确认的信息不一致。");
+    }
+    private static string RelativePackPath(string root, string path) {
+        string prefix = root + Path.DirectorySeparatorChar;
+        if (!path.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) throw new InvalidDataException("附加包不属于所选数据目录。");
+        string relative = path.Substring(prefix.Length).Replace('\\', '/');
+        BedrockPackInspector.ValidatePath(relative);
+        string[] parts = relative.Split('/');
+        if (parts.Length is < 2 or > 3 || !Categories.Contains(parts[0], StringComparer.OrdinalIgnoreCase))
+            throw new InvalidDataException("附加包位置不受支持。");
+        return relative;
+    }
+    private static string NormalizeRoot(BedrockDataRoot root) {
+        string path = Path.GetFullPath(root.Path).TrimEnd(Path.DirectorySeparatorChar);
+        BedrockDataRootFinder.EnsureNoReparsePoints(path);
+        return path;
+    }
+    private static bool Contains(string parent, string path) => string.Equals(parent, path, StringComparison.OrdinalIgnoreCase) ||
+        path.StartsWith(parent + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
+}
