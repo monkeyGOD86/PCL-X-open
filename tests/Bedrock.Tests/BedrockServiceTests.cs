@@ -8,6 +8,7 @@ public class BedrockServiceTests {
         var tests = new BedrockServiceTests();
         var packTests = new BedrockPackInspectorTests();
         var worldTests = new BedrockWorldReaderTests();
+        var worldPackTests = new BedrockWorldPackEditorTests();
         Action[] cases = [tests.DetectionDistinguishesNoInstallationFromQueryFailure,
             tests.LaunchRejectsRegistrationChangedSinceSelection,
             tests.LaunchRevalidatesAndPassesTheRegisteredApplicationToWindows,
@@ -35,7 +36,12 @@ public class BedrockServiceTests {
             packTests.RejectsAddonWithAmbiguousFiles,
             packTests.CommitsAndRollsBackMultiPackTransaction,
             packTests.RecoversInterruptedTransactionAndRefusesChangedContent,
-            packTests.RejectsTamperedTransactionJournal];
+            packTests.RejectsTamperedTransactionJournal,
+            worldPackTests.UpdatesAndRestoresWorldConfigWithoutDiscardingFields,
+            worldPackTests.CreatesAndRevertsMissingConfigWithoutDeletingIt,
+            worldPackTests.RejectsStaleSnapshotAndConflictingVersion,
+            worldPackTests.DisablesOnlySelectedPackAndRejectsTamperedBackup,
+            worldPackTests.RejectsBackupInGameDataAndDuplicateUuid];
         int failures = 0;
         foreach (var test in cases) {
             try { test(); Console.WriteLine($"PASS {test.Method.Name}"); }
