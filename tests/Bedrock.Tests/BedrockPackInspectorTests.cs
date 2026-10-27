@@ -281,13 +281,13 @@ public sealed class BedrockPackInspectorTests {
         string fixture = Path.Combine(Path.GetTempPath(), "pcl-bedrock-remove-test-" + Guid.NewGuid().ToString("N"));
         string game = Path.Combine(fixture, "game"), backup = Path.Combine(fixture, "backup"),
             pack = Path.Combine(game, "resource_packs", "package", "1.2.3");
-        Directory.CreateDirectory(pack); Directory.CreateDirectory(backup);
+        Directory.CreateDirectory(pack); Directory.CreateDirectory(backup); Directory.CreateDirectory(Path.Combine(game, "minecraftWorlds"));
         try {
             File.WriteAllText(Path.Combine(pack, "manifest.json"), Manifest);
             File.WriteAllText(Path.Combine(pack, "data.txt"), "user data");
             var root = new BedrockDataRoot(game, "fixture");
             var selected = BedrockAddonCatalog.Read(root).Single();
-            var removal = BedrockAddonRemoval.Remove(root, selected, BedrockDirectoryInstaller.Preview(pack), backup);
+            var removal = BedrockAddonRemoval.Remove(root, selected, BedrockDirectoryInstaller.Preview(pack), backup, [root]);
             Check(!Directory.Exists(pack) && File.ReadAllText(Path.Combine(removal.BackupPath, "data.txt")) == "user data", "backup or quarantine missing");
             Check(BedrockAddonRemoval.Restore(root, removal.TransactionPath) == pack, "original location not restored");
             Check(File.ReadAllText(Path.Combine(pack, "data.txt")) == "user data" && Directory.Exists(removal.BackupPath), "restore lost data");
@@ -297,11 +297,11 @@ public sealed class BedrockPackInspectorTests {
     public void RefusesRestorationOverExistingOrModifiedPack() {
         string fixture = Path.Combine(Path.GetTempPath(), "pcl-bedrock-remove-test-" + Guid.NewGuid().ToString("N"));
         string game = Path.Combine(fixture, "game"), backup = Path.Combine(fixture, "backup"), pack = Path.Combine(game, "resource_packs", "package");
-        Directory.CreateDirectory(pack); Directory.CreateDirectory(backup);
+        Directory.CreateDirectory(pack); Directory.CreateDirectory(backup); Directory.CreateDirectory(Path.Combine(game, "minecraftWorlds"));
         try {
             File.WriteAllText(Path.Combine(pack, "manifest.json"), Manifest);
             var root = new BedrockDataRoot(game, "fixture");
-            var removal = BedrockAddonRemoval.Remove(root, BedrockAddonCatalog.Read(root).Single(), BedrockDirectoryInstaller.Preview(pack), backup);
+            var removal = BedrockAddonRemoval.Remove(root, BedrockAddonCatalog.Read(root).Single(), BedrockDirectoryInstaller.Preview(pack), backup, [root]);
             Directory.CreateDirectory(pack);
             File.WriteAllText(Path.Combine(pack, "existing.txt"), "keep");
             try { BedrockAddonRemoval.Restore(root, removal.TransactionPath); throw new Exception("existing destination accepted"); }
@@ -319,22 +319,47 @@ public sealed class BedrockPackInspectorTests {
     public void RejectsChangedRemovalAndTamperedRemovalJournal() {
         string fixture = Path.Combine(Path.GetTempPath(), "pcl-bedrock-remove-test-" + Guid.NewGuid().ToString("N"));
         string game = Path.Combine(fixture, "game"), backup = Path.Combine(fixture, "backup"), pack = Path.Combine(game, "resource_packs", "package");
-        Directory.CreateDirectory(pack); Directory.CreateDirectory(backup);
+        Directory.CreateDirectory(pack); Directory.CreateDirectory(backup); Directory.CreateDirectory(Path.Combine(game, "minecraftWorlds"));
         try {
             File.WriteAllText(Path.Combine(pack, "manifest.json"), Manifest);
             var root = new BedrockDataRoot(game, "fixture");
             var selected = BedrockAddonCatalog.Read(root).Single();
             var preview = BedrockDirectoryInstaller.Preview(pack);
             File.WriteAllText(Path.Combine(pack, "extra.txt"), "change");
-            try { BedrockAddonRemoval.Remove(root, selected, preview, backup); throw new Exception("changed pack accepted"); }
+            try { BedrockAddonRemoval.Remove(root, selected, preview, backup, [root]); throw new Exception("changed pack accepted"); }
             catch (InvalidDataException) { }
             Check(Directory.Exists(pack) && !Directory.EnumerateFileSystemEntries(backup).Any(), "failed removal changed data");
-            var removal = BedrockAddonRemoval.Remove(root, selected, BedrockDirectoryInstaller.Preview(pack), backup);
+            var removal = BedrockAddonRemoval.Remove(root, selected, BedrockDirectoryInstaller.Preview(pack), backup, [root]);
             string journal = Path.Combine(removal.TransactionPath, "journal.json");
             File.WriteAllText(journal, File.ReadAllText(journal).Replace("resource_packs/package", "../outside"));
             try { BedrockAddonRemoval.Restore(root, removal.TransactionPath); throw new Exception("tampered journal accepted"); }
             catch (InvalidDataException) { }
             Check(Directory.Exists(Path.Combine(removal.TransactionPath, "content")) && Directory.Exists(removal.BackupPath), "tampered journal lost data");
+        } finally { Directory.Delete(fixture, true); }
+    }
+
+    public void RefusesRemovalWhenAccountWorldReferencesSharedPack() {
+        string fixture = Path.Combine(Path.GetTempPath(), "pcl-bedrock-remove-usage-test-" + Guid.NewGuid().ToString("N"));
+        string shared = Path.Combine(fixture, "shared"), account = Path.Combine(fixture, "account"), backup = Path.Combine(fixture, "backup");
+        string pack = Path.Combine(shared, "resource_packs", "package"), world = Path.Combine(account, "minecraftWorlds", "world");
+        Directory.CreateDirectory(pack); Directory.CreateDirectory(world); Directory.CreateDirectory(backup);
+        try {
+            File.WriteAllText(Path.Combine(pack, "manifest.json"), Manifest);
+            File.WriteAllText(Path.Combine(world, "level.dat"), "fixture");
+            File.WriteAllText(Path.Combine(world, "world_resource_packs.json"), "[{\"pack_id\":\"11111111-1111-4111-8111-111111111111\",\"version\":[1,2,3]}]");
+            var target = new BedrockDataRoot(shared, "shared", false);
+            var worldRoot = new BedrockDataRoot(account, "account");
+            try {
+                BedrockAddonRemoval.Remove(target, BedrockAddonCatalog.Read(target).Single(), BedrockDirectoryInstaller.Preview(pack), backup, [worldRoot]);
+                throw new Exception("in-use pack was removed");
+            } catch (InvalidDataException) { }
+            Check(Directory.Exists(pack) && !Directory.EnumerateFileSystemEntries(backup).Any(), "referenced pack changed");
+            File.WriteAllText(Path.Combine(world, "world_resource_packs.json"), "invalid");
+            try {
+                BedrockAddonRemoval.Remove(target, BedrockAddonCatalog.Read(target).Single(), BedrockDirectoryInstaller.Preview(pack), backup, [worldRoot]);
+                throw new Exception("incomplete world scan accepted");
+            } catch (InvalidDataException) { }
+            Check(Directory.Exists(pack), "pack changed after incomplete scan");
         } finally { Directory.Delete(fixture, true); }
     }
 

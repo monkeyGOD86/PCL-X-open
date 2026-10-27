@@ -134,6 +134,19 @@ public sealed class BedrockWorldReaderTests {
         } finally { Directory.Delete(root); Directory.Delete(games); Directory.Delete(shared); }
     });
 
+    public void DetectsWorldPackUsageAndIncompleteWorlds() => WithWorld((_, root, world) => {
+        string config = Path.Combine(world, "world_resource_packs.json");
+        Guid uuid = Guid.Parse("11111111-1111-4111-8111-111111111111");
+        File.WriteAllText(Path.Combine(world, "level.dat"), "fixture");
+        File.WriteAllText(config, "[{\"pack_id\":\"11111111-1111-4111-8111-111111111111\",\"version\":[1,2,3]}]");
+        var dataRoot = new BedrockDataRoot(root, "fixture");
+        var usage = BedrockWorldPackUsage.Check([dataRoot], uuid);
+        Check(usage.Complete && usage.References.Count == 1 && usage.References[0].Kind == "resource", "world reference not detected");
+        File.WriteAllText(config, "invalid");
+        usage = BedrockWorldPackUsage.Check([dataRoot], uuid);
+        Check(!usage.Complete, "unreadable world was treated as safe");
+    });
+
     private static void WithWorld(Action<string, string, string> test) {
         string temp = Path.Combine(Path.GetTempPath(), "pcl-bedrock-world-test-" + Guid.NewGuid().ToString("N"));
         string product = Path.Combine(temp, "Minecraft Bedrock");
