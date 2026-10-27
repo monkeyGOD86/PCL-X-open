@@ -70,10 +70,12 @@ Public Class PageBedrockRight
         ComboRoots.Items.Clear()
         ComboWorlds.Items.Clear()
         ComboAddons.Items.Clear()
+        ComboTransactions.Items.Clear()
         LabWorldStatus.Text = ""
         LabWorldDetails.Text = ""
         LabAddonStatus.Text = ""
         LabAddonDetails.Text = ""
+        LabTransactionStatus.Text = ""
         LabRootsStatus.Text = "正在查找候选数据目录…"
         SetBusy(True)
         Try
@@ -98,12 +100,74 @@ Public Class PageBedrockRight
         BtnReadWorlds.IsEnabled = Not IsBusy AndAlso Root IsNot Nothing AndAlso Root.SupportsWorlds
         BtnRestore.IsEnabled = Not IsBusy AndAlso Root IsNot Nothing AndAlso Root.SupportsWorlds
         BtnListAddons.IsEnabled = Not IsBusy AndAlso Root IsNot Nothing
+        BtnListTransactions.IsEnabled = Not IsBusy AndAlso Root IsNot Nothing
         ComboWorlds.Items.Clear()
         ComboAddons.Items.Clear()
+        ComboTransactions.Items.Clear()
         LabWorldStatus.Text = If(Root IsNot Nothing AndAlso Not Root.SupportsWorlds, "共享内容目录不用于管理账户世界。", "")
         LabWorldDetails.Text = ""
         LabAddonStatus.Text = ""
         LabAddonDetails.Text = ""
+        LabTransactionStatus.Text = ""
+    End Sub
+
+    Private Async Sub ListTransactionsClicked(sender As Object, e As EventArgs) Handles BtnListTransactions.Click
+        Dim RootItem = TryCast(ComboRoots.SelectedItem, MyComboBoxItem)
+        Dim Root = TryCast(RootItem?.Tag, BedrockDataRoot)
+        If IsBusy OrElse Root Is Nothing Then Return
+        ComboTransactions.Items.Clear()
+        LabTransactionStatus.Text = "正在检查事务记录…"
+        SetBusy(True)
+        Try
+            Dim Transactions = Await Task.Run(Function() BedrockAddonTransaction.List(Root))
+            For Each Transaction In Transactions
+                ComboTransactions.Items.Add(New MyComboBoxItem With {.Content = Transaction.State & " · " & Path.GetFileName(Transaction.Path), .Tag = Transaction})
+            Next
+            LabTransactionStatus.Text = If(Transactions.Count = 0, "此目录没有发现事务记录。", $"发现 {Transactions.Count} 条事务记录；请选择查看。")
+        Catch ex As Exception
+            LabTransactionStatus.Text = "读取事务失败：" & ex.Message
+            Logger.Warn(ex, "读取基岩版附加包事务失败")
+        Finally
+            SetBusy(False)
+        End Try
+    End Sub
+
+    Private Sub TransactionSelectionChanged(sender As Object, e As SelectionChangedEventArgs) Handles ComboTransactions.SelectionChanged
+        Dim Item = TryCast(ComboTransactions.SelectedItem, MyComboBoxItem)
+        Dim Transaction = TryCast(Item?.Tag, BedrockAddonTransactionInfo)
+        BtnRollbackTransaction.IsEnabled = Not IsBusy AndAlso Transaction IsNot Nothing AndAlso Transaction.Error Is Nothing AndAlso Transaction.Installed > 0
+        If Transaction IsNot Nothing Then
+            LabTransactionStatus.Text = $"{Transaction.State}：暂存 {Transaction.Staged}，已移动 {Transaction.Installed}，缺失 {Transaction.Missing}。" &
+                vbCrLf & Transaction.Path & If(Transaction.Error Is Nothing, "", vbCrLf & Transaction.Error)
+        End If
+    End Sub
+
+    Private Async Sub RollbackTransactionClicked(sender As Object, e As EventArgs) Handles BtnRollbackTransaction.Click
+        Dim Root = TryCast(TryCast(ComboRoots.SelectedItem, MyComboBoxItem)?.Tag, BedrockDataRoot)
+        Dim Transaction = TryCast(TryCast(ComboTransactions.SelectedItem, MyComboBoxItem)?.Tag, BedrockAddonTransactionInfo)
+        If IsBusy OrElse Root Is Nothing OrElse Transaction Is Nothing Then Return
+        If IsKnownBedrockProcessRunning() Then
+            MyMsgBox("请先关闭 Minecraft 基岩版，再恢复事务。", "附加包事务恢复")
+            Return
+        End If
+        If MyMsgBox("请确认游戏已关闭且存档同步已完成。" & vbCrLf & vbCrLf &
+                    "数据目录：" & Root.Path & vbCrLf & "事务目录：" & Transaction.Path & vbCrLf &
+                    "未修改的事务包将移回暂存目录，不会删除文件；有变化时操作会停止。", "确认恢复事务", "恢复", "取消") <> 1 Then Return
+        SetBusy(True)
+        LabTransactionStatus.Text = "正在校验并恢复事务…"
+        Try
+            Await Task.Run(Sub()
+                               If IsKnownBedrockProcessRunning() Then Throw New InvalidOperationException("Minecraft 正在运行，请关闭后重试。")
+                               BedrockAddonTransaction.Rollback(Root, Transaction.Path)
+                           End Sub)
+            LabTransactionStatus.Text = "已将可恢复的包移回暂存目录；请重新读取事务记录。目录：" & Transaction.Path
+            ComboTransactions.Items.Clear()
+        Catch ex As Exception
+            LabTransactionStatus.Text = "恢复未完成：" & ex.Message
+            Logger.Warn(ex, "恢复基岩版附加包事务失败")
+        Finally
+            SetBusy(False)
+        End Try
     End Sub
 
     Private Async Sub ReadAddonsClicked(sender As Object, e As EventArgs) Handles BtnListAddons.Click
@@ -363,6 +427,11 @@ Public Class PageBedrockRight
         BtnReadWorlds.IsEnabled = Not Value AndAlso Root IsNot Nothing AndAlso Root.SupportsWorlds
         BtnRestore.IsEnabled = Not Value AndAlso Root IsNot Nothing AndAlso Root.SupportsWorlds
         BtnListAddons.IsEnabled = Not Value AndAlso Root IsNot Nothing
+        BtnListTransactions.IsEnabled = Not Value AndAlso Root IsNot Nothing
+        ComboTransactions.IsEnabled = Not Value AndAlso ComboTransactions.Items.Count > 0
+        Dim TransactionItem = TryCast(ComboTransactions.SelectedItem, MyComboBoxItem)
+        Dim Transaction = TryCast(TransactionItem?.Tag, BedrockAddonTransactionInfo)
+        BtnRollbackTransaction.IsEnabled = Not Value AndAlso Transaction IsNot Nothing AndAlso Transaction.Error Is Nothing AndAlso Transaction.Installed > 0
         ComboAddons.IsEnabled = Not Value AndAlso ComboAddons.Items.Count > 0
         ComboWorlds.IsEnabled = Not Value AndAlso ComboWorlds.Items.Count > 0
         Dim WorldItem = TryCast(ComboWorlds.SelectedItem, MyComboBoxItem)
