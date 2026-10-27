@@ -80,12 +80,12 @@ public sealed class BedrockPackInspectorTests {
             Directory.CreateDirectory(Path.Combine(source, "textures"));
             File.WriteAllText(Path.Combine(source, "textures", "test.txt"), "original");
             var root = new BedrockDataRoot(rootPath, "fixture");
-            var preview = BedrockPackInspector.InspectDirectory(source);
-            string installed = BedrockDirectoryInstaller.Install(root, source, preview.Uuid, preview.Version);
+            var preview = BedrockDirectoryInstaller.Preview(source);
+            string installed = BedrockDirectoryInstaller.Install(root, source, preview);
             Check(File.ReadAllText(Path.Combine(installed, "textures", "test.txt")) == "original", "installed contents differ");
             File.WriteAllText(Path.Combine(source, "textures", "test.txt"), "changed");
             try {
-                BedrockDirectoryInstaller.Install(root, source, preview.Uuid, preview.Version);
+                BedrockDirectoryInstaller.Install(root, source, BedrockDirectoryInstaller.Preview(source));
                 throw new Exception("duplicate was accepted");
             } catch (InvalidDataException) { }
             Check(File.ReadAllText(Path.Combine(installed, "textures", "test.txt")) == "original", "existing package was overwritten");
@@ -103,14 +103,16 @@ public sealed class BedrockPackInspectorTests {
         try {
             File.WriteAllText(Path.Combine(source, "manifest.json"), Manifest);
             var root = new BedrockDataRoot(rootPath, "fixture");
-            var preview = BedrockPackInspector.InspectDirectory(source);
+            var preview = BedrockDirectoryInstaller.Preview(source);
+            File.WriteAllText(Path.Combine(source, "manifest.json"), Manifest.Replace("demo", "test"));
             try {
-                BedrockDirectoryInstaller.Install(root, source, preview.Uuid, "9.9.9");
+                BedrockDirectoryInstaller.Install(root, source, preview);
                 throw new Exception("changed preview was accepted");
             } catch (InvalidDataException) { }
+            preview = BedrockDirectoryInstaller.Preview(source);
             Directory.CreateDirectory(Path.Combine(category, "unknown"));
             try {
-                BedrockDirectoryInstaller.Install(root, source, preview.Uuid, preview.Version);
+                BedrockDirectoryInstaller.Install(root, source, preview);
                 throw new Exception("incomplete catalog was accepted");
             } catch (InvalidDataException) { }
             Check(Directory.GetDirectories(category).Length == 1, "unexpected package installed");

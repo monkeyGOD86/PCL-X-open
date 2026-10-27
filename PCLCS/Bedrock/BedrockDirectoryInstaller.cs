@@ -3,6 +3,11 @@ using System.Text;
 
 namespace PCLCS.Bedrock;
 
+public sealed class BedrockDirectoryPreview(BedrockPackInfo pack, string fingerprint) {
+    public BedrockPackInfo Pack { get; } = pack;
+    public string Fingerprint { get; } = fingerprint;
+}
+
 /// <summary>
 /// Experimental single-directory installer. Callers must confirm the selected root,
 /// ensure the game and sync are stopped, and validate game compatibility first.
@@ -12,7 +17,16 @@ public static class BedrockDirectoryInstaller {
     private const long MaxFileBytes = 256L * 1024 * 1024;
     private const long MaxTotalBytes = 1024L * 1024 * 1024;
 
-    public static string Install(BedrockDataRoot root, string source, Guid expectedUuid, string expectedVersion) {
+    public static BedrockDirectoryPreview Preview(string source) {
+        _ = BedrockPackInspector.InspectDirectory(source);
+        string fingerprint = Fingerprint(source);
+        var pack = BedrockPackInspector.InspectDirectory(source);
+        if (!string.Equals(fingerprint, Fingerprint(source), StringComparison.Ordinal))
+            throw new IOException("附加包在预览期间发生变化，请重试。");
+        return new(pack, fingerprint);
+    }
+
+    public static string Install(BedrockDataRoot root, string source, BedrockDirectoryPreview confirmed) {
         string rootPath = Path.GetFullPath(root.Path).TrimEnd(Path.DirectorySeparatorChar);
         string sourcePath = Path.GetFullPath(source).TrimEnd(Path.DirectorySeparatorChar);
         BedrockDataRootFinder.EnsureNoReparsePoints(rootPath);
@@ -30,7 +44,8 @@ public static class BedrockDirectoryInstaller {
             catch (System.Threading.AbandonedMutexException) { acquired = true; }
             if (!acquired) throw new IOException("另一个启动器正在操作该数据目录。");
             var preview = BedrockPackInspector.InspectDirectory(sourcePath);
-            if (preview.Uuid != expectedUuid || preview.Version != expectedVersion)
+            if (preview.Uuid != confirmed.Pack.Uuid || preview.Version != confirmed.Pack.Version ||
+                !string.Equals(Fingerprint(sourcePath), confirmed.Fingerprint, StringComparison.Ordinal))
                 throw new InvalidDataException("附加包与确认的预览不一致，请重新预览。");
             bool resource = preview.Modules.Contains("resources");
             bool behavior = preview.Modules.Contains("data");
@@ -51,7 +66,8 @@ public static class BedrockDirectoryInstaller {
                 CopyTree(sourcePath, stage);
                 var staged = BedrockPackInspector.InspectDirectory(stage);
                 if (staged.Uuid != preview.Uuid || staged.Version != preview.Version ||
-                    !staged.Modules.SequenceEqual(preview.Modules))
+                    !staged.Modules.SequenceEqual(preview.Modules) ||
+                    !string.Equals(Fingerprint(stage), confirmed.Fingerprint, StringComparison.Ordinal))
                     throw new InvalidDataException("复制后的附加包与预览不一致。");
                 EnsureNoConflict(root, staged);
                 BedrockDataRootFinder.EnsureNoReparsePoints(stage);
@@ -111,6 +127,56 @@ public static class BedrockDirectoryInstaller {
                 }
             }
         }
+    }
+
+    // Hash paths, empty directories and file contents, so confirmation applies to the complete tree.
+    private static string Fingerprint(string directory) {
+        string root = Path.GetFullPath(directory).TrimEnd(Path.DirectorySeparatorChar);
+        BedrockDataRootFinder.EnsureNoReparsePoints(root);
+        var pending = new Stack<string>();
+        var paths = new List<string>();
+        pending.Push(root);
+        while (pending.Count > 0) {
+            string folder = pending.Pop();
+            BedrockDataRootFinder.EnsureNoReparsePoints(folder);
+            foreach (string path in Directory.EnumerateFileSystemEntries(folder)) {
+                if (paths.Count >= MaxEntries) throw new InvalidDataException("附加包条目过多。");
+                BedrockDataRootFinder.EnsureNoReparsePoints(path);
+                BedrockPackInspector.ValidatePath(path.Substring(root.Length + 1).Replace('\\', '/'));
+                paths.Add(path);
+                if ((File.GetAttributes(path) & FileAttributes.Directory) != 0) pending.Push(path);
+            }
+        }
+        paths.Sort((left, right) => StringComparer.Ordinal.Compare(left.Substring(root.Length + 1), right.Substring(root.Length + 1)));
+        using var algorithm = SHA256.Create();
+        using var sink = new CryptoStream(Stream.Null, algorithm, CryptoStreamMode.Write);
+        using var writer = new BinaryWriter(sink, new UTF8Encoding(false), leaveOpen: true);
+        long total = 0;
+        foreach (string path in paths) {
+            BedrockDataRootFinder.EnsureNoReparsePoints(path);
+            bool isDirectory = (File.GetAttributes(path) & FileAttributes.Directory) != 0;
+            writer.Write(isDirectory);
+            writer.Write(path.Substring(root.Length + 1).Replace('\\', '/'));
+            if (isDirectory) continue;
+            using var input = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+            long length = input.Length;
+            if (length > MaxFileBytes || length > MaxTotalBytes - total) throw new InvalidDataException("附加包超过大小限制。");
+            writer.Write(length);
+            writer.Flush();
+            byte[] buffer = new byte[65536];
+            long countTotal = 0;
+            int count;
+            while ((count = input.Read(buffer, 0, buffer.Length)) > 0) {
+                countTotal += count;
+                if (countTotal > length) throw new IOException("来源文件在读取期间发生变化。");
+                sink.Write(buffer, 0, count);
+            }
+            if (countTotal != length) throw new IOException("来源文件在读取期间发生变化。");
+            total += countTotal;
+        }
+        writer.Flush();
+        sink.FlushFinalBlock();
+        return BitConverter.ToString(algorithm.Hash!).Replace("-", "");
     }
 
     private static bool ContainsPath(string parent, string path) =>
