@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.IO.Compression;
 using System.Text;
 using PCLCS.Bedrock;
 
@@ -7,15 +8,51 @@ internal static class Program {
         try {
             if (args.Length == 1 && args[0] == "list") { List(); return 0; }
             if (args.Length == 1 && args[0] == "fixture") { Fixture(); return 0; }
+            if (args.Length == 1 && args[0] == "fixture-addon") { FixtureAddon(); return 0; }
             if (args.Length == 4 && args[0] == "plan") { _ = Plan(args[1], args[2], args[3]); return 0; }
             if (args.Length == 4 && args[0] == "install") { Install(args[1], args[2], args[3]); return 0; }
             if (args.Length == 4 && args[0] == "rollback") { Rollback(args[1], args[2], args[3]); return 0; }
-            Console.Error.WriteLine("用法：list | fixture | plan <包族> <目标数据根> <测试包目录> | install <包族> <目标数据根> <测试包目录> | rollback <包族> <目标数据根> <事务目录>");
+            Console.Error.WriteLine("用法：list | fixture | fixture-addon | plan <包族> <目标数据根> <测试包> | install <包族> <目标数据根> <测试包> | rollback <包族> <目标数据根> <事务目录>");
             return 2;
         } catch (Exception ex) {
             Console.Error.WriteLine("操作未完成：" + ex.Message);
             return 1;
         }
+    }
+
+    private static void FixtureAddon() {
+        string parent = Path.GetFullPath(Path.GetTempPath()).TrimEnd(Path.DirectorySeparatorChar);
+        EnsureNoLinks(parent);
+        foreach (var installation in new WindowsBedrockPackageCatalog().FindInstalled())
+            foreach (var root in new BedrockDataRootFinder().Find(installation))
+                if (IsWithin(root.Path, parent)) throw new InvalidOperationException("系统临时目录位于游戏数据中，不能创建测试包。");
+        string archivePath = Path.Combine(parent, "pcl-bedrock-test-addon-" + Guid.NewGuid().ToString("N") + ".mcaddon");
+        string resourceId = Guid.NewGuid().ToString("D"), behaviorId = Guid.NewGuid().ToString("D");
+        using (var file = new FileStream(archivePath, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+        using (var archive = new ZipArchive(file, ZipArchiveMode.Create)) {
+            AddNestedPack(archive, "resource.mcpack", "PCL Resource Test", "resources", resourceId);
+            AddNestedPack(archive, "behavior.mcpack", "PCL Behavior Test", "data", behaviorId);
+        }
+        var packs = BedrockPackInspector.Inspect(archivePath);
+        Console.WriteLine("测试附加包：" + archivePath);
+        foreach (var pack in packs) Console.WriteLine($"{pack.Name}：{pack.Uuid}　{pack.Version}");
+        Console.WriteLine("测试包由本工具创建，不含游戏文件；创建它没有修改游戏数据。");
+    }
+
+    private static void AddNestedPack(ZipArchive parent, string fileName, string name, string type, string uuid) {
+        using var nestedBytes = new MemoryStream();
+        using (var nested = new ZipArchive(nestedBytes, ZipArchiveMode.Create, true)) {
+            string manifest = "{\"format_version\":2,\"header\":{\"name\":\"" + name +
+                "\",\"description\":\"Temporary validation pack\",\"uuid\":\"" + uuid +
+                "\",\"version\":[1,0,0],\"min_engine_version\":[1,20,0]},\"modules\":[{\"type\":\"" + type +
+                "\",\"uuid\":\"" + Guid.NewGuid().ToString("D") + "\",\"version\":[1,0,0]}]}";
+            using (var writer = new StreamWriter(nested.CreateEntry("manifest.json").Open(), new UTF8Encoding(false))) writer.Write(manifest);
+            using (var writer = new StreamWriter(nested.CreateEntry(type == "data" ? "functions/pcl_probe.mcfunction" : "texts/en_US.lang").Open(), new UTF8Encoding(false)))
+                writer.Write(type == "data" ? "# Temporary compatibility test\n" : "pcl.test=Temporary validation pack\n");
+        }
+        using var output = parent.CreateEntry(fileName).Open();
+        byte[] bytes = nestedBytes.ToArray();
+        output.Write(bytes, 0, bytes.Length);
     }
 
     private static void List() {
@@ -64,7 +101,7 @@ internal static class Program {
 
     private static void Install(string family, string targetPath, string fixture) {
         EnsureGameClosed();
-        var (installation, _, scope, preview) = Plan(family, targetPath, fixture);
+        var (installation, _, scope, packs) = Plan(family, targetPath, fixture);
         Console.WriteLine("确认游戏已关闭、同步已完成，且目标目录正确。将创建可恢复事务和新的包目录，不覆盖已有包。");
         Confirm();
         EnsureGameClosed();
@@ -72,7 +109,7 @@ internal static class Program {
         if (!SameRegistration(installation, currentInstallation)) throw new IOException("游戏注册状态已变化，请重新开始。");
         if (!SameScope(scope, currentScope))
             throw new IOException("候选目录已变化，请重新开始。");
-        string transaction = BedrockAddonTransaction.Prepare(currentTarget, [new BedrockPreparedPack(fixture, preview)], currentScope);
+        string transaction = BedrockAddonTransaction.Prepare(currentTarget, packs, currentScope);
         Console.WriteLine("事务目录（请保留以便恢复）：" + transaction);
         EnsureGameClosed();
         var (finalInstallation, finalTarget, finalScope) = Resolve(family, targetPath);
@@ -82,24 +119,32 @@ internal static class Program {
         Console.WriteLine("包文件已提交。请手动启动游戏检查是否识别；这不代表游戏已加载或启用该包。");
     }
 
-    private static (BedrockInstallation Installation, BedrockDataRoot Target, IReadOnlyList<BedrockDataRoot> Scope, BedrockDirectoryPreview Preview)
+    private static (BedrockInstallation Installation, BedrockDataRoot Target, IReadOnlyList<BedrockDataRoot> Scope, IReadOnlyList<BedrockPreparedPack> Packs)
         Plan(string family, string targetPath, string fixture) {
         var (installation, target, scope) = Resolve(family, targetPath);
-        ValidateFixture(fixture);
-        var preview = BedrockDirectoryInstaller.Preview(fixture);
-        if (preview.Pack.Name != "PCL Compatibility Test" || preview.Pack.Version != "1.0.0" ||
-            preview.Pack.Modules.Count != 1 || preview.Pack.Modules[0] != "resources")
+        bool isAddon = ValidateFixture(fixture);
+        string temp = Path.GetFullPath(Path.GetTempPath()).TrimEnd(Path.DirectorySeparatorChar);
+        if (scope.Any(root => IsWithin(root.Path, temp))) throw new InvalidDataException("临时目录位于游戏数据目录中，不能准备测试包。");
+        IReadOnlyList<BedrockPreparedPack> packs = isAddon
+            ? BedrockArchivePreparer.PrepareMcaddon(fixture, temp).Packs
+            : [new BedrockPreparedPack(fixture, BedrockDirectoryInstaller.Preview(fixture))];
+        if (packs.Any(item => item.Preview.Pack.Version != "1.0.0" || item.Preview.Pack.Modules.Count != 1) ||
+            (!isAddon && (packs.Count != 1 || packs[0].Preview.Pack.Name != "PCL Compatibility Test" || packs[0].Preview.Pack.Modules[0] != "resources")) ||
+            (isAddon && (packs.Count != 2 || !packs.Any(item => item.Preview.Pack.Name == "PCL Resource Test" && item.Preview.Pack.Modules[0] == "resources") ||
+                         !packs.Any(item => item.Preview.Pack.Name == "PCL Behavior Test" && item.Preview.Pack.Modules[0] == "data"))))
             throw new InvalidDataException("测试包清单不符合探针要求。");
-        Console.WriteLine("目标包族：" + family + "\n注册包：" + installation.PackageFullName + "\n目标目录：" + target.Path + "\n包 UUID：" + preview.Pack.Uuid + "\n包指纹：" + preview.Fingerprint);
+        Console.WriteLine("目标包族：" + family + "\n注册包：" + installation.PackageFullName + "\n目标目录：" + target.Path);
+        foreach (var pack in packs) Console.WriteLine($"包：{pack.Preview.Pack.Name}  UUID：{pack.Preview.Pack.Uuid}  指纹：{pack.Preview.Fingerprint}");
         Console.WriteLine("检查范围：");
         foreach (var root in scope) Console.WriteLine("  " + root.Path);
-        var conflicts = BedrockAddonScope.Check(scope, [preview.Pack.Uuid]);
+        var conflicts = BedrockAddonScope.Check(scope, packs.Select(item => item.Preview.Pack.Uuid));
         if (!conflicts.Complete) throw new InvalidDataException("部分目录中的包无法识别，不能安全检查冲突：" + string.Join("；", conflicts.IncompleteRoots));
         if (conflicts.Conflicts.Count > 0) throw new InvalidDataException("发现相同 UUID 的现有包，不能测试。");
-        if (!Directory.Exists(Path.Combine(target.Path, "resource_packs"))) throw new InvalidDataException("目标缺少 resource_packs 目录。");
-        Console.WriteLine("只读预检查通过。计划创建事务目录及 resource_packs 下的新包目录；不覆盖现有文件。");
+        if (!Directory.Exists(Path.Combine(target.Path, "resource_packs")) || isAddon && !Directory.Exists(Path.Combine(target.Path, "behavior_packs")))
+            throw new InvalidDataException("目标缺少资源包或行为包目录。");
+        Console.WriteLine("游戏数据只读预检查通过。计划创建事务及新包目录；不覆盖现有文件。临时准备目录会保留。");
         Console.WriteLine("游戏对该布局的识别尚未验证；请在游戏关闭且同步完成后执行测试。");
-        return (installation, target, scope, preview);
+        return (installation, target, scope, packs);
     }
 
     private static void Rollback(string family, string targetPath, string transaction) {
@@ -123,15 +168,19 @@ internal static class Program {
         before.Select(item => item.Path).OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
             .SequenceEqual(after.Select(item => item.Path).OrderBy(path => path, StringComparer.OrdinalIgnoreCase), StringComparer.OrdinalIgnoreCase);
 
-    private static void ValidateFixture(string fixture) {
+    private static bool ValidateFixture(string fixture) {
         string path = Path.GetFullPath(fixture).TrimEnd(Path.DirectorySeparatorChar);
         string temp = Path.GetFullPath(Path.GetTempPath()).TrimEnd(Path.DirectorySeparatorChar);
         EnsureNoLinks(temp);
         string name = Path.GetFileName(path);
-        const string prefix = "pcl-bedrock-test-pack-";
-        if (!string.Equals(Path.GetDirectoryName(path), temp, StringComparison.OrdinalIgnoreCase) ||
-            !name.StartsWith(prefix, StringComparison.Ordinal) || !Guid.TryParseExact(name.Substring(prefix.Length), "N", out _))
+        const string packPrefix = "pcl-bedrock-test-pack-", addonPrefix = "pcl-bedrock-test-addon-";
+        bool isPack = name.StartsWith(packPrefix, StringComparison.Ordinal) && Guid.TryParseExact(name.Substring(packPrefix.Length), "N", out _);
+        bool isAddon = name.StartsWith(addonPrefix, StringComparison.Ordinal) && name.EndsWith(".mcaddon", StringComparison.OrdinalIgnoreCase) &&
+            Guid.TryParseExact(name.Substring(addonPrefix.Length, name.Length - addonPrefix.Length - ".mcaddon".Length), "N", out _);
+        if (!string.Equals(Path.GetDirectoryName(path), temp, StringComparison.OrdinalIgnoreCase) || !(isPack || isAddon))
             throw new InvalidDataException("只接受此探针在系统临时目录创建的测试包。");
+        EnsureNoLinks(path);
+        return isAddon;
     }
 
     private static bool IsWithin(string parent, string path) {

@@ -9,15 +9,16 @@
 ```powershell
 dotnet run --project .\tools\bedrock-probe\PackProbe\PackProbe.csproj -c Release -- list
 dotnet run --project .\tools\bedrock-probe\PackProbe\PackProbe.csproj -c Release -- fixture
+dotnet run --project .\tools\bedrock-probe\PackProbe\PackProbe.csproj -c Release -- fixture-addon
 ```
 
-`list` 显示已注册包族与候选数据根；候选目录不等于当前游戏账户已确认使用该目录。`fixture` 在系统临时目录创建独立测试包并打印路径和 UUID，不写游戏数据。对用户确认的目标运行以下预检查（将尖括号内容替换为 `list` 和 `fixture` 的输出）：
+`list` 显示已注册包族与候选数据根；候选目录不等于当前游戏账户已确认使用该目录。`fixture` 在系统临时目录创建独立资源包；`fixture-addon` 创建包含一个资源包和一个行为包的自制 `.mcaddon`。它们打印路径和 UUID，不写游戏数据。对用户确认的目标运行以下预检查（将尖括号内容替换为 `list` 和所选 fixture 的输出）：
 
 ```powershell
 dotnet run --project .\tools\bedrock-probe\PackProbe\PackProbe.csproj -c Release -- plan '<包族>' '<目标数据根>' '<测试包目录>'
 ```
 
-`plan` 检查候选目录、所提供安装的全部发现目录中的 UUID 冲突及目标 `resource_packs` 是否存在。未知包、不可读取目录或冲突会阻止测试。它无法发现所有可能的数据目录，也无法确认游戏授权、同步状态或游戏能否识别包。预检查不会在游戏目录创建事务或包。
+`plan` 检查候选目录、所提供安装的全部发现目录中的 UUID 冲突以及所需目标目录是否存在。未知包、不可读取目录或冲突会阻止测试。它无法发现所有可能的数据目录，也无法确认游戏授权、同步状态或游戏能否识别包。预检查不会在游戏目录创建事务或包；`.mcaddon` 会在临时目录解压准备并保留临时内容。
 
 ## 经确认后的验证及恢复
 
@@ -27,7 +28,7 @@ dotnet run --project .\tools\bedrock-probe\PackProbe\PackProbe.csproj -c Release
 dotnet run --project .\tools\bedrock-probe\PackProbe\PackProbe.csproj -c Release -- install '<包族>' '<目标数据根>' '<测试包目录>'
 ```
 
-工具再次显示目标、UUID、指纹和检查范围；输入 `YES` 后才创建事务和新包目录。它会检查常见游戏进程，但不能证明其他进程或云同步已停止。成功只表示文件已移动；随后由用户手动启动游戏，检查资源包列表是否识别 **PCL Compatibility Test**。保留工具打印的事务目录。测试不需要启用资源包或修改任何世界。
+工具再次显示目标、UUID、指纹和检查范围；输入 `YES` 后才创建事务和新包目录。它会检查常见游戏进程，但不能证明其他进程或云同步已停止。成功只表示文件已移动；随后由用户手动启动游戏检查是否识别测试包。单包为 **PCL Compatibility Test**；多包包含 **PCL Resource Test** 和 **PCL Behavior Test**，后者可在新建世界的行为包选择页面查看，无需创建世界或启用任何包。保留工具打印的事务目录。
 
 完成观察后再次关闭游戏、等待同步，并运行：
 
