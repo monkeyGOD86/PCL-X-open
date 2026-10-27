@@ -275,6 +275,7 @@ Public Class PageBedrockRight
         Dim Item = TryCast(ComboAddons.SelectedItem, MyComboBoxItem)
         Dim Addon = TryCast(Item?.Tag, BedrockInstalledAddon)
         BtnCheckDependencies.IsEnabled = Not IsBusy AndAlso Addon IsNot Nothing AndAlso Addon.Manifest IsNot Nothing AndAlso Addon.Manifest.Dependencies.Count > 0
+        RefreshRemoveAddonButton()
         If Addon Is Nothing Then
             LabAddonDetails.Text = ""
         ElseIf Addon.Manifest Is Nothing Then
@@ -286,6 +287,87 @@ Public Class PageBedrockRight
                                    If(Pack.Dependencies.Count = 0, "", "依赖：" & String.Join(", ", Pack.Dependencies) & vbCrLf) &
                                    If(Addon.Warnings.Count = 0, "", "提示：" & String.Join("；", Addon.Warnings))
         End If
+    End Sub
+
+    Private Async Sub RemoveAddonClicked(sender As Object, e As EventArgs) Handles BtnRemoveAddon.Click
+        Dim Installation = TryCast(TryCast(ComboInstall.SelectedItem, MyComboBoxItem)?.Tag, BedrockInstallation)
+        Dim Root = TryCast(TryCast(ComboRoots.SelectedItem, MyComboBoxItem)?.Tag, BedrockDataRoot)
+        Dim Addon = TryCast(TryCast(ComboAddons.SelectedItem, MyComboBoxItem)?.Tag, BedrockInstalledAddon)
+        If IsBusy OrElse Not CanRemoveAddon(Installation, Root, Addon) Then Return
+        If IsKnownBedrockProcessRunning() Then
+            MyMsgBox("请先关闭 Minecraft 基岩版并等待同步完成。", "移除资源包")
+            Return
+        End If
+        SetBusy(True)
+        Try
+            LabAddonStatus.Text = "正在检查资源包和世界引用…"
+            Dim Roots = Await Task.Run(Function() ValidateInstallTarget(Installation, Root))
+            Dim WorldRoots = Roots.Where(Function(Item) Item.SupportsWorlds AndAlso Directory.Exists(Path.Combine(Item.Path, "minecraftWorlds"))).ToArray()
+            If WorldRoots.Length = 0 Then Throw New InvalidOperationException("没有可检查的世界目录，不能安全移除。")
+            Dim Preview = Await Task.Run(Function() BedrockDirectoryInstaller.Preview(Addon.Path))
+            If Preview.Pack.Uuid <> Addon.Manifest.Uuid OrElse Preview.Pack.Version <> Addon.Manifest.Version Then
+                Throw New InvalidOperationException("资源包已变化，请重新读取附加包。")
+            End If
+            Dim Usage = Await Task.Run(Function() BedrockWorldPackUsage.Check(WorldRoots, Preview.Pack.Uuid))
+            If Not Usage.Complete Then Throw New InvalidOperationException("部分世界无法完整检查，不能安全移除。")
+            If Usage.References.Count > 0 Then Throw New InvalidOperationException("有世界仍引用此资源包，请先检查世界配置。")
+            Using Dialog As New System.Windows.Forms.FolderBrowserDialog With {.Description = "选择游戏数据目录之外的备份文件夹", .ShowNewFolderButton = True}
+                If Dialog.ShowDialog() <> System.Windows.Forms.DialogResult.OK Then
+                    LabAddonStatus.Text = "已取消移除。"
+                    Return
+                End If
+                Dim Backup = Path.GetFullPath(Dialog.SelectedPath).TrimEnd(Path.DirectorySeparatorChar)
+                If Roots.Any(Function(Item) IsWithinRoot(Item.Path, Backup)) Then Throw New InvalidOperationException("备份不能位于候选游戏数据目录内。")
+                Dim Skipped = Roots.Where(Function(Item) Item.SupportsWorlds AndAlso Not WorldRoots.Any(Function(WorldRoot) String.Equals(WorldRoot.Path, Item.Path, StringComparison.OrdinalIgnoreCase))).ToArray()
+                If MyMsgBox("请确认游戏已关闭且同步完成。此功能尚未在真实用户附加包上验证。" & vbCrLf & vbCrLf &
+                            "资源包：" & Preview.Pack.Name & "　" & Preview.Pack.Version & vbCrLf & "UUID：" & Preview.Pack.Uuid.ToString() & vbCrLf &
+                            "原目录：" & Addon.Path & vbCrLf & "备份目录：" & Backup & vbCrLf &
+                            "已检查世界目录：" & vbCrLf & String.Join(vbCrLf, WorldRoots.Select(Function(Item) Item.Path)) & vbCrLf &
+                            If(Skipped.Length > 0, "未检查的候选世界目录：" & vbCrLf & String.Join(vbCrLf, Skipped.Select(Function(Item) Item.Path)) & vbCrLf, "") &
+                            "全局资源引用、云端和未列出的账户无法检查；移除可能影响这些引用。将先创建外部备份，再移入可恢复的隔离目录。", "确认实验性移除", "移除", "取消") <> 1 Then
+                    LabAddonStatus.Text = "已取消移除。"
+                    Return
+                End If
+                LabAddonStatus.Text = "正在备份并隔离资源包…"
+                Dim Removed = Await Task.Run(Function()
+                                                 If IsKnownBedrockProcessRunning() Then Throw New InvalidOperationException("Minecraft 正在运行，请关闭后重试。")
+                                                 Dim CurrentRoots = ValidateInstallTarget(Installation, Root)
+                                                 If Not SameRoots(Roots, CurrentRoots) Then Throw New InvalidOperationException("数据目录范围已变化，请重新确认。")
+                                                 Dim CurrentWorldRoots = CurrentRoots.Where(Function(Item) Item.SupportsWorlds AndAlso Directory.Exists(Path.Combine(Item.Path, "minecraftWorlds"))).ToArray()
+                                                 If Not SameRoots(WorldRoots, CurrentWorldRoots) Then Throw New InvalidOperationException("世界目录范围已变化，请重新确认。")
+                                                 Return BedrockAddonRemoval.Remove(Root, Addon, Preview, Backup, WorldRoots)
+                                             End Function)
+                ComboAddons.Items.Clear()
+                LabAddonDetails.Text = ""
+                LabAddonStatus.Text = "资源包已移入隔离目录。外部备份：" & Removed.BackupPath & vbCrLf & "事务：" & Removed.TransactionPath &
+                                      vbCrLf & "可在移除记录中恢复；游戏引用状态需自行确认。"
+            End Using
+        Catch ex As Exception
+            LabAddonStatus.Text = "移除未完成：" & ex.Message
+            Logger.Warn(ex, "实验性基岩版资源包移除失败")
+        Finally
+            SetBusy(False)
+        End Try
+    End Sub
+
+    Private Shared Function IsWithinRoot(Root As String, Candidate As String) As Boolean
+        Dim BasePath = Path.GetFullPath(Root).TrimEnd(Path.DirectorySeparatorChar)
+        Dim TargetPath = Path.GetFullPath(Candidate).TrimEnd(Path.DirectorySeparatorChar)
+        Return String.Equals(BasePath, TargetPath, StringComparison.OrdinalIgnoreCase) OrElse
+               TargetPath.StartsWith(BasePath & Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
+    End Function
+
+    Private Shared Function CanRemoveAddon(Installation As BedrockInstallation, Root As BedrockDataRoot, Addon As BedrockInstalledAddon) As Boolean
+        Return IsValidatedResourceTarget(Installation, Root) AndAlso Addon IsNot Nothing AndAlso Addon.Manifest IsNot Nothing AndAlso
+               Addon.Category = "资源包" AndAlso Addon.Manifest.Modules.Contains("resources") AndAlso Not Addon.Manifest.Modules.Contains("data")
+    End Function
+
+    Private Sub RefreshRemoveAddonButton()
+        If BtnRemoveAddon Is Nothing OrElse ComboInstall Is Nothing OrElse ComboRoots Is Nothing OrElse ComboAddons Is Nothing Then Return
+        Dim Installation = TryCast(TryCast(ComboInstall.SelectedItem, MyComboBoxItem)?.Tag, BedrockInstallation)
+        Dim Root = TryCast(TryCast(ComboRoots.SelectedItem, MyComboBoxItem)?.Tag, BedrockDataRoot)
+        Dim Addon = TryCast(TryCast(ComboAddons.SelectedItem, MyComboBoxItem)?.Tag, BedrockInstalledAddon)
+        BtnRemoveAddon.IsEnabled = Not IsBusy AndAlso CanRemoveAddon(Installation, Root, Addon)
     End Sub
 
     Private Async Sub CheckDependenciesClicked(sender As Object, e As EventArgs) Handles BtnCheckDependencies.Click
@@ -681,6 +763,7 @@ Public Class PageBedrockRight
         ComboAddons.IsEnabled = Not Value AndAlso ComboAddons.Items.Count > 0
         Dim SelectedAddon = TryCast(TryCast(ComboAddons.SelectedItem, MyComboBoxItem)?.Tag, BedrockInstalledAddon)
         BtnCheckDependencies.IsEnabled = Not Value AndAlso SelectedAddon IsNot Nothing AndAlso SelectedAddon.Manifest IsNot Nothing AndAlso SelectedAddon.Manifest.Dependencies.Count > 0
+        RefreshRemoveAddonButton()
         ComboWorlds.IsEnabled = Not Value AndAlso ComboWorlds.Items.Count > 0
         Dim WorldItem = TryCast(ComboWorlds.SelectedItem, MyComboBoxItem)
         Dim World = TryCast(WorldItem?.Tag, BedrockWorldInfo)
