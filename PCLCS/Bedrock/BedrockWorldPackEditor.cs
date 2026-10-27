@@ -38,6 +38,8 @@ public static class BedrockWorldPackEditor {
         bool resource = pack.Modules.Contains("resources"), behavior = pack.Modules.Contains("data");
         if (pack.Uuid == Guid.Empty || resource == behavior || (snapshot.Kind == "resource" ? !resource : !behavior))
             throw new InvalidDataException("附加包类型与配置不匹配。");
+        if (enabled && resource && pack.PackScope is not ("any" or "world"))
+            throw new InvalidDataException("此资源包的使用范围不允许或无法确认用于世界。");
         int[] version = ParseVersion(pack.Version);
         string rootPath = Path.GetFullPath(root.Path).TrimEnd(Path.DirectorySeparatorChar);
         string backups = Path.GetFullPath(backupDirectory).TrimEnd(Path.DirectorySeparatorChar);

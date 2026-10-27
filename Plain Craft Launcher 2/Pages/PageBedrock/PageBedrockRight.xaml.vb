@@ -593,6 +593,7 @@ Public Class PageBedrockRight
         For Each Pack In Packs
             Lines.Add($"{Pack.Name}　{Pack.Version}" & vbCrLf &
                       $"UUID：{Pack.Uuid}　类型：{String.Join(", ", Pack.Modules)}" & vbCrLf &
+                      If(Pack.Modules.Contains("resources"), "资源包使用范围：" & Pack.PackScope & vbCrLf, "") &
                       If(Pack.Dependencies.Count > 0, "依赖：" & String.Join(", ", Pack.Dependencies) & vbCrLf, "") &
                       If(Pack.MinEngineVersion IsNot Nothing, "最低游戏版本：" & Pack.MinEngineVersion & vbCrLf, ""))
         Next

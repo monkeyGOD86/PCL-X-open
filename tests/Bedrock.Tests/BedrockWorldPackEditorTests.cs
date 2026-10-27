@@ -77,6 +77,18 @@ public sealed class BedrockWorldPackEditorTests {
         Check(!Directory.EnumerateFiles(backup).Any(), "invalid edit wrote a backup");
     });
 
+    public void RefusesGlobalOrUnknownResourceScopeInWorld() => WithFixture((root, world, backup) => {
+        string config = Path.Combine(world.Path, "world_resource_packs.json");
+        File.WriteAllText(config, "[]");
+        foreach (string scope in new[] { "global", "future-scope" }) {
+            var pack = new BedrockPackInfo("fixture", "", Pack.Uuid, "1.2.3", ["resources"], [], null, scope);
+            var snapshot = BedrockWorldPackEditor.Read(root, world, "resource");
+            try { BedrockWorldPackEditor.SetEnabled(root, world, snapshot, pack, true, backup); throw new Exception("restricted scope accepted"); }
+            catch (InvalidDataException) { }
+        }
+        Check(File.ReadAllText(config) == "[]" && !Directory.EnumerateFiles(backup).Any(), "restricted scope changed world data");
+    });
+
     private static void WithFixture(Action<BedrockDataRoot, BedrockWorldInfo, string> run) {
         string fixture = Path.Combine(Path.GetTempPath(), "pcl-world-config-test-" + Guid.NewGuid().ToString("N"));
         string root = Path.Combine(fixture, "game"), world = Path.Combine(root, "minecraftWorlds", "test"), backup = Path.Combine(fixture, "backups");

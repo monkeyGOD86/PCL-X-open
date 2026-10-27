@@ -16,7 +16,14 @@ public sealed class BedrockPackInspectorTests {
         var pack = BedrockPackInspector.Inspect(path).Single();
         Check(pack.Name == "pack.name" && pack.Version == "1.2.3" && pack.MinEngineVersion == "1.20.0", "metadata was not preserved");
         Check(pack.Modules.Contains("resources") && pack.Dependencies.Single() == "@minecraft/server 1.2.0", "modules or dependencies missing");
+        Check(pack.PackScope == "any", "missing scope did not default to any");
     });
+
+    public void ReadsResourcePackScopeAndRejectsInvalidType() {
+        WithArchive(".mcpack", zip => Add(zip, "manifest.json", Manifest.Replace("\"description\":\"demo\"", "\"description\":\"demo\",\"pack_scope\":\"global\"")),
+            path => Check(BedrockPackInspector.Inspect(path).Single().PackScope == "global", "scope not preserved"));
+        WithArchive(".mcpack", zip => Add(zip, "manifest.json", Manifest.Replace("\"description\":\"demo\"", "\"description\":\"demo\",\"pack_scope\":42")), Reject);
+    }
 
     public void ParsesNestedAddon() {
         using var nested = new MemoryStream();

@@ -15,6 +15,7 @@ public class BedrockServiceTests {
             tests.UnsupportedApplicationIsNotActivated,
             tests.ActivationErrorIsReportedRatherThanClaimedAsSuccess,
             packTests.ParsesResourcePackMetadata,
+            packTests.ReadsResourcePackScopeAndRejectsInvalidType,
             packTests.ParsesNestedAddon,
             packTests.RejectsUnsafePathsAndDuplicateNames,
             packTests.RejectsWorldAndInvalidManifest,
@@ -50,7 +51,8 @@ public class BedrockServiceTests {
             worldPackTests.CreatesAndRevertsMissingConfigWithoutDeletingIt,
             worldPackTests.RejectsStaleSnapshotAndConflictingVersion,
             worldPackTests.DisablesOnlySelectedPackAndRejectsTamperedBackup,
-            worldPackTests.RejectsBackupInGameDataAndDuplicateUuid];
+            worldPackTests.RejectsBackupInGameDataAndDuplicateUuid,
+            worldPackTests.RefusesGlobalOrUnknownResourceScopeInWorld];
         int failures = 0;
         foreach (var test in cases) {
             try { test(); Console.WriteLine($"PASS {test.Method.Name}"); }

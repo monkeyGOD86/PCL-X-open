@@ -5,7 +5,7 @@ using System.Text.RegularExpressions;
 namespace PCLCS.Bedrock;
 
 public sealed class BedrockPackInfo(string name, string description, Guid uuid, string version,
-    IReadOnlyList<string> modules, IReadOnlyList<string> dependencies, string? minEngineVersion) {
+    IReadOnlyList<string> modules, IReadOnlyList<string> dependencies, string? minEngineVersion, string? packScope = null) {
     public string Name { get; } = name;
     public string Description { get; } = description;
     public Guid Uuid { get; } = uuid;
@@ -13,6 +13,8 @@ public sealed class BedrockPackInfo(string name, string description, Guid uuid, 
     public IReadOnlyList<string> Modules { get; } = modules;
     public IReadOnlyList<string> Dependencies { get; } = dependencies;
     public string? MinEngineVersion { get; } = minEngineVersion;
+    /// <summary>Declared resource pack scope; absent means any. Unknown values remain explicit.</summary>
+    public string PackScope { get; } = packScope ?? "any";
 }
 
 /// <summary>Validates archives without extracting or executing their contents.</summary>
@@ -219,11 +221,16 @@ public static class BedrockPackInspector {
                     (dependency["version"] is null ? "" : " " + ReadVersion(dependency["version"])));
             }
             string? minEngine = header["min_engine_version"] is null ? null : ReadVersion(header["min_engine_version"]);
+            JToken? scopeToken = header["pack_scope"];
+            if (scopeToken is not null && scopeToken.Type != JTokenType.String) throw new InvalidDataException("包使用范围无效。");
+            string? packScope = scopeToken?.Value<string>();
+            if (packScope is not null && (packScope.Length is < 1 or > 64 || packScope.Any(char.IsControl)))
+                throw new InvalidDataException("包使用范围无效。");
             string name = header.Value<string>("name") ?? "未命名";
             string description = header.Value<string>("description") ?? "";
             if (name.Length > 256 || description.Length > 4096) throw new InvalidDataException("清单中的名称或描述过长。");
             return new(name, description,
-                uuid, version, modules, dependencies, minEngine);
+                uuid, version, modules, dependencies, minEngine, packScope);
         } catch (Exception ex) when (ex is JsonException or DecoderFallbackException or FormatException or OverflowException) {
             throw new InvalidDataException("附加包清单无效。", ex);
         }
