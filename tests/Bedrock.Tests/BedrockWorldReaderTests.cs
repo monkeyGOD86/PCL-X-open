@@ -42,6 +42,18 @@ public sealed class BedrockWorldReaderTests {
         } finally { File.Delete(backup); }
     });
 
+    public void BacksUpHighlyCompressibleWorldData() => WithWorld((temp, root, world) => {
+        string source = Path.Combine(world, "level.dat");
+        string backup = temp + ".zip";
+        File.WriteAllText(source, new string('A', 2 * 1024 * 1024));
+        try {
+            var info = BedrockWorldBackup.Create(new BedrockDataRoot(root, "fixture"),
+                new BedrockWorldInfo(world, "Test", true, [], [], null), backup);
+            Check(info.Files == 1 && BedrockWorldBackup.Verify(backup).Files == 1, "valid repetitive world data was rejected");
+            Check(new FileInfo(source).Length == 2 * 1024 * 1024, "source was changed");
+        } finally { File.Delete(backup); }
+    });
+
     public void RejectsBackupInsideGameData() => WithWorld((_, root, world) => {
         File.WriteAllText(Path.Combine(world, "level.dat"), "fixture");
         var info = new BedrockWorldInfo(world, "Test", true, [], [], null);

@@ -62,7 +62,9 @@ public static class BedrockWorldBackup {
                         using var input = new FileStream(entryPath, FileMode.Open, FileAccess.Read, FileShare.Read);
                         long length = input.Length;
                         if (length > MaxBytes - total) throw new InvalidDataException("世界大小超过备份限制。");
-                        var entry = archive.CreateEntry("world/" + relative, CompressionLevel.Optimal);
+                        // Our verifier rejects extreme ratios. Store files without compression so
+                        // legitimate repetitive world data cannot produce a self-rejected backup.
+                        var entry = archive.CreateEntry("world/" + relative, CompressionLevel.NoCompression);
                         using var outputStream = entry.Open();
                         using var hash = SHA256.Create();
                         byte[] buffer = new byte[65536];
