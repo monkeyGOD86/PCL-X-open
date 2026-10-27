@@ -51,7 +51,7 @@ internal static class Program {
         Console.WriteLine("测试包由本工具创建，不含游戏文件；创建它没有修改游戏数据。");
     }
 
-    private static (BedrockDataRoot Target, IReadOnlyList<BedrockDataRoot> Scope) Resolve(string family, string targetPath) {
+    private static (BedrockInstallation Installation, BedrockDataRoot Target, IReadOnlyList<BedrockDataRoot> Scope) Resolve(string family, string targetPath) {
         var matches = new WindowsBedrockPackageCatalog().FindInstalled().Where(item =>
             string.Equals(item.FamilyName, family, StringComparison.OrdinalIgnoreCase)).ToArray();
         if (matches.Length != 1) throw new InvalidOperationException("包族未注册或无法唯一识别，请先运行 list。");
@@ -59,35 +59,38 @@ internal static class Program {
         string normalized = Path.GetFullPath(targetPath).TrimEnd(Path.DirectorySeparatorChar);
         var target = scope.SingleOrDefault(item => string.Equals(Path.GetFullPath(item.Path).TrimEnd(Path.DirectorySeparatorChar),
             normalized, StringComparison.OrdinalIgnoreCase));
-        return (target ?? throw new InvalidOperationException("目标不是该游戏发现的候选目录。"), scope);
+        return (matches[0], target ?? throw new InvalidOperationException("目标不是该游戏发现的候选目录。"), scope);
     }
 
     private static void Install(string family, string targetPath, string fixture) {
         EnsureGameClosed();
-        var (target, scope, preview) = Plan(family, targetPath, fixture);
+        var (installation, _, scope, preview) = Plan(family, targetPath, fixture);
         Console.WriteLine("确认游戏已关闭、同步已完成，且目标目录正确。将创建可恢复事务和新的包目录，不覆盖已有包。");
         Confirm();
         EnsureGameClosed();
-        var (currentTarget, currentScope) = Resolve(family, targetPath);
-        if (!scope.Select(item => item.Path).OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
-            .SequenceEqual(currentScope.Select(item => item.Path).OrderBy(path => path, StringComparer.OrdinalIgnoreCase), StringComparer.OrdinalIgnoreCase))
+        var (currentInstallation, currentTarget, currentScope) = Resolve(family, targetPath);
+        if (!SameRegistration(installation, currentInstallation)) throw new IOException("游戏注册状态已变化，请重新开始。");
+        if (!SameScope(scope, currentScope))
             throw new IOException("候选目录已变化，请重新开始。");
         string transaction = BedrockAddonTransaction.Prepare(currentTarget, [new BedrockPreparedPack(fixture, preview)], currentScope);
         Console.WriteLine("事务目录（请保留以便恢复）：" + transaction);
         EnsureGameClosed();
-        BedrockAddonTransaction.Commit(currentTarget, transaction, currentScope);
+        var (finalInstallation, finalTarget, finalScope) = Resolve(family, targetPath);
+        if (!SameRegistration(installation, finalInstallation) || !SameScope(scope, finalScope))
+            throw new IOException("准备期间游戏注册或数据目录已变化，请保留事务并检查。");
+        BedrockAddonTransaction.Commit(finalTarget, transaction, finalScope);
         Console.WriteLine("包文件已提交。请手动启动游戏检查是否识别；这不代表游戏已加载或启用该包。");
     }
 
-    private static (BedrockDataRoot Target, IReadOnlyList<BedrockDataRoot> Scope, BedrockDirectoryPreview Preview)
+    private static (BedrockInstallation Installation, BedrockDataRoot Target, IReadOnlyList<BedrockDataRoot> Scope, BedrockDirectoryPreview Preview)
         Plan(string family, string targetPath, string fixture) {
-        var (target, scope) = Resolve(family, targetPath);
+        var (installation, target, scope) = Resolve(family, targetPath);
         ValidateFixture(fixture);
         var preview = BedrockDirectoryInstaller.Preview(fixture);
         if (preview.Pack.Name != "PCL Compatibility Test" || preview.Pack.Version != "1.0.0" ||
             preview.Pack.Modules.Count != 1 || preview.Pack.Modules[0] != "resources")
             throw new InvalidDataException("测试包清单不符合探针要求。");
-        Console.WriteLine("目标包族：" + family + "\n目标目录：" + target.Path + "\n包 UUID：" + preview.Pack.Uuid + "\n包指纹：" + preview.Fingerprint);
+        Console.WriteLine("目标包族：" + family + "\n注册包：" + installation.PackageFullName + "\n目标目录：" + target.Path + "\n包 UUID：" + preview.Pack.Uuid + "\n包指纹：" + preview.Fingerprint);
         Console.WriteLine("检查范围：");
         foreach (var root in scope) Console.WriteLine("  " + root.Path);
         var conflicts = BedrockAddonScope.Check(scope, [preview.Pack.Uuid]);
@@ -96,20 +99,29 @@ internal static class Program {
         if (!Directory.Exists(Path.Combine(target.Path, "resource_packs"))) throw new InvalidDataException("目标缺少 resource_packs 目录。");
         Console.WriteLine("只读预检查通过。计划创建事务目录及 resource_packs 下的新包目录；不覆盖现有文件。");
         Console.WriteLine("游戏对该布局的识别尚未验证；请在游戏关闭且同步完成后执行测试。");
-        return (target, scope, preview);
+        return (installation, target, scope, preview);
     }
 
     private static void Rollback(string family, string targetPath, string transaction) {
         EnsureGameClosed();
-        var (target, _) = Resolve(family, targetPath);
+        var (installation, target, _) = Resolve(family, targetPath);
         Console.WriteLine("目标包族：" + family + "\n目标目录：" + target.Path + "\n事务目录：" + transaction);
         Console.WriteLine("确认游戏已关闭、同步已完成。未修改的包将移回暂存区，事务和文件会保留。");
         Confirm();
         EnsureGameClosed();
-        var (currentTarget, _) = Resolve(family, targetPath);
+        var (currentInstallation, currentTarget, _) = Resolve(family, targetPath);
+        if (!SameRegistration(installation, currentInstallation)) throw new IOException("游戏注册状态已变化，请重新检查。");
         BedrockAddonTransaction.Rollback(currentTarget, transaction);
         Console.WriteLine("恢复操作结束。请保留事务目录，并检查记录状态。");
     }
+
+    private static bool SameRegistration(BedrockInstallation before, BedrockInstallation after) =>
+        string.Equals(before.PackageFullName, after.PackageFullName, StringComparison.OrdinalIgnoreCase) &&
+        string.Equals(before.AppUserModelId, after.AppUserModelId, StringComparison.OrdinalIgnoreCase);
+
+    private static bool SameScope(IReadOnlyList<BedrockDataRoot> before, IReadOnlyList<BedrockDataRoot> after) =>
+        before.Select(item => item.Path).OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
+            .SequenceEqual(after.Select(item => item.Path).OrderBy(path => path, StringComparer.OrdinalIgnoreCase), StringComparer.OrdinalIgnoreCase);
 
     private static void ValidateFixture(string fixture) {
         string path = Path.GetFullPath(fixture).TrimEnd(Path.DirectorySeparatorChar);
