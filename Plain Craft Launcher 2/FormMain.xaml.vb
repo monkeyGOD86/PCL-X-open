@@ -3,6 +3,8 @@ Imports System.Windows.Interop
 
 Public Class FormMain
 
+    Private FrmBedrockRight As PageBedrockRight
+
 #Region "基础"
 
     '更新日志
@@ -1032,6 +1034,13 @@ Public Class FormMain
         End Try
     End Sub
     Private Sub FileDrag(FilePathList As IEnumerable(Of String))
+        If PageCurrent = PageType.Bedrock AndAlso FrmBedrockRight IsNot Nothing Then
+            Dim Files = FilePathList.ToList()
+            If Files.Count = 1 AndAlso {".mcpack", ".mcaddon"}.Contains(Path.GetExtension(Files(0)).ToLowerInvariant()) Then
+                FrmBedrockRight.PreviewPackage(Files(0))
+                Return
+            End If
+        End If
         RunInNewThread(
         Sub()
             Dim FilePath As String = FilePathList.First
@@ -1229,6 +1238,8 @@ Public Class FormMain
         ''' 帮助详情。这是一个副页面。
         ''' </summary>
         HelpDetail = 9
+        ''' <summary>Windows 基岩版。</summary>
+        Bedrock = 10
     End Enum
     ''' <summary>
     ''' 次要页面种类。其数值必须与 StackPanel 中的下标一致。
@@ -1372,7 +1383,17 @@ Public Class FormMain
             '切换到主页面
             PageChangeExit()
             IsChangingPage = True '防止下面的勾选直接触发了 PageChangeActual
-            CType(PanTitleSelect.Children(Stack), MyRadioButton).SetChecked(True, True, PageNameGet(PageCurrent) = "")
+            Dim TitleButton As MyRadioButton
+            Select Case Stack.Page
+                Case PageType.Launch : TitleButton = BtnTitleSelect0
+                Case PageType.Download : TitleButton = BtnTitleSelect1
+                Case PageType.Link : TitleButton = BtnTitleSelect2
+                Case PageType.Setup : TitleButton = BtnTitleSelect3
+                Case PageType.Other : TitleButton = BtnTitleSelect4
+                Case PageType.Bedrock : TitleButton = BtnTitleSelectBedrock
+                Case Else : Throw New ArgumentException("未知的顶级页面：" & Stack.Page.ToString())
+            End Select
+            TitleButton.SetChecked(True, True, PageNameGet(PageCurrent) = "")
             IsChangingPage = False
             Select Case Stack.Page
                 Case PageType.Download
@@ -1399,7 +1420,7 @@ Public Class FormMain
     ''' <summary>
     ''' 通过点击导航栏改变页面。
     ''' </summary>
-    Private Sub BtnTitleSelect_Click(sender As MyRadioButton, raiseByMouse As Boolean) Handles BtnTitleSelect0.Check, BtnTitleSelect1.Check, BtnTitleSelect2.Check, BtnTitleSelect3.Check, BtnTitleSelect4.Check
+    Private Sub BtnTitleSelect_Click(sender As MyRadioButton, raiseByMouse As Boolean) Handles BtnTitleSelect0.Check, BtnTitleSelect1.Check, BtnTitleSelect2.Check, BtnTitleSelect3.Check, BtnTitleSelect4.Check, BtnTitleSelectBedrock.Check
         If IsChangingPage Then Return
         PageChangeActual(Val(sender.Tag))
     End Sub
@@ -1503,6 +1524,9 @@ Public Class FormMain
                     PageChangeAnim(New MyPageLeft, FrmDownloadResourceDetail)
                 Case PageType.HelpDetail '帮助详情
                     PageChangeAnim(New MyPageLeft, Stack.Additional(1))
+                Case PageType.Bedrock
+                    If FrmBedrockRight Is Nothing Then FrmBedrockRight = New PageBedrockRight
+                    PageChangeAnim(New MyPageLeft, FrmBedrockRight)
             End Select
 #End Region
 

@@ -286,6 +286,9 @@
     <Compile Include="Pages\PageDownload\Resource\PageDownloadCompDetail.xaml.vb">
       <DependentUpon>PageDownloadCompDetail.xaml</DependentUpon>
     </Compile>
+    <Compile Include="Pages\PageBedrock\PageBedrockRight.xaml.vb">
+      <DependentUpon>PageBedrockRight.xaml</DependentUpon>
+    </Compile>
     <Compile Include="Pages\PageLaunch\MyMsgLogin.xaml.vb">
       <DependentUpon>MyMsgLogin.xaml</DependentUpon>
     </Compile>
@@ -535,6 +538,10 @@
     <Page Include="Pages\PageDownload\Resource\PageDownloadCompDetail.xaml">
       <SubType>Designer</SubType>
       <Generator>MSBuild:Compile</Generator>
+    </Page>
+    <Page Include="Pages\PageBedrock\PageBedrockRight.xaml">
+      <Generator>MSBuild:Compile</Generator>
+      <SubType>Designer</SubType>
     </Page>
     <Page Include="Pages\PageLaunch\MyMsgLogin.xaml">
       <Generator>MSBuild:Compile</Generator>

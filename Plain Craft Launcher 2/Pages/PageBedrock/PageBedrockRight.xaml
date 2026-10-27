@@ -1,0 +1,30 @@
+<local:MyPageRight xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                   xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                   xmlns:local="clr-namespace:PCL" x:Class="PageBedrockRight" PanScroll="PanBack">
+    <local:MyScrollViewer x:Name="PanBack" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+        <StackPanel Margin="25,10,25,25">
+            <local:MyCard Title="Minecraft 基岩版" Margin="0,15,0,15">
+                <StackPanel Margin="21,40,21,20">
+                    <TextBlock Text="启动当前 Windows 用户已安装的 Minecraft for Windows。" TextWrapping="Wrap" />
+                    <TextBlock x:Name="LabStatus" Margin="0,14,0,8" Text="正在检查安装状态…" TextWrapping="Wrap" />
+                    <local:MyComboBox x:Name="ComboInstall" Height="34" IsEnabled="False" />
+                    <TextBlock x:Name="LabDetails" Margin="0,12,0,0" TextWrapping="Wrap" />
+                    <StackPanel Orientation="Horizontal" Margin="0,15,0,0">
+                        <local:MyButton x:Name="BtnStart" Text="启动游戏" ColorType="Highlight" Height="35" MinWidth="120" IsEnabled="False" />
+                        <local:MyButton x:Name="BtnRefresh" Text="刷新安装状态" Height="35" MinWidth="130" Margin="10,0,0,0" />
+                    </StackPanel>
+                </StackPanel>
+            </local:MyCard>
+            <local:MyCard Title="内容管理" Margin="0,0,0,15">
+                <StackPanel Margin="21,40,21,20">
+                    <TextBlock Text="选择或拖入 .mcpack / .mcaddon 文件，查看包信息。" TextWrapping="Wrap" />
+                    <TextBlock x:Name="LabPackInfo" Text="附加包导入和世界管理将在完成数据保护验证后开放。" Margin="0,10,0,0" TextWrapping="Wrap" />
+                    <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
+                        <local:MyButton x:Name="BtnAddons" Text="预览附加包" Height="35" MinWidth="120" />
+                        <local:MyButton x:Name="BtnWorlds" Text="世界管理" Height="35" MinWidth="120" Margin="10,0,0,0" IsEnabled="False" />
+                    </StackPanel>
+                </StackPanel>
+            </local:MyCard>
+        </StackPanel>
+    </local:MyScrollViewer>
+</local:MyPageRight>
