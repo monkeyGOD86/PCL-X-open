@@ -6,6 +6,7 @@ Public Class PageBedrockRight
     Private IsBusy As Boolean
     Private SelectedPackPath As String
     Private SelectedPackIsDirectory As Boolean
+    Private WorldAddonScanIncomplete As Boolean = True
 
     Private Class WorldAddonChoice
         Public ReadOnly Root As BedrockDataRoot
@@ -13,6 +14,15 @@ Public Class PageBedrockRight
         Public Sub New(Root As BedrockDataRoot, Addon As BedrockInstalledAddon)
             Me.Root = Root
             Me.Addon = Addon
+        End Sub
+    End Class
+
+    Private Class WorldAddonList
+        Public ReadOnly Choices As IReadOnlyList(Of WorldAddonChoice)
+        Public ReadOnly IncompleteRoots As IReadOnlyList(Of String)
+        Public Sub New(Choices As IReadOnlyList(Of WorldAddonChoice), IncompleteRoots As IReadOnlyList(Of String))
+            Me.Choices = Choices
+            Me.IncompleteRoots = IncompleteRoots
         End Sub
     End Class
 
@@ -440,6 +450,7 @@ Public Class PageBedrockRight
         Dim World = TryCast(Item?.Tag, BedrockWorldInfo)
         BtnBackup.IsEnabled = Not IsBusy AndAlso World IsNot Nothing AndAlso World.HasLevelData
         If ComboWorldAddons IsNot Nothing Then ComboWorldAddons.Items.Clear()
+        WorldAddonScanIncomplete = True
         If LabWorldAddonStatus IsNot Nothing Then LabWorldAddonStatus.Text = ""
         RefreshWorldAddonButtons()
         If World Is Nothing Then
@@ -462,18 +473,21 @@ Public Class PageBedrockRight
         Dim World = TryCast(TryCast(ComboWorlds.SelectedItem, MyComboBoxItem)?.Tag, BedrockWorldInfo)
         If IsBusy OrElse Installation Is Nothing OrElse Root Is Nothing OrElse Not Root.SupportsWorlds OrElse World Is Nothing Then Return
         ComboWorldAddons.Items.Clear()
+        WorldAddonScanIncomplete = True
         LabWorldAddonStatus.Text = "正在读取候选目录中的附加包…"
         SetBusy(True)
         Try
-            Dim Choices = Await Task.Run(Function()
-                                             Dim Roots = ValidateInstallTarget(Installation, Root)
-                                             Return CollectWorldAddons(Roots)
-                                         End Function)
-            For Each Choice In Choices
+            Dim Result = Await Task.Run(Function()
+                                            Dim Roots = ValidateInstallTarget(Installation, Root)
+                                            Return CollectWorldAddons(Roots)
+                                        End Function)
+            WorldAddonScanIncomplete = Result.IncompleteRoots.Count > 0
+            For Each Choice In Result.Choices
                 Dim Pack = Choice.Addon.Manifest
                 ComboWorldAddons.Items.Add(New MyComboBoxItem With {.Content = Choice.Root.Source & " · " & Pack.Name & " · " & Pack.Version, .Tag = Choice})
             Next
-            LabWorldAddonStatus.Text = If(Choices.Count = 0, "候选目录中没有可识别的附加包。", $"发现 {Choices.Count} 个候选包；请选择后检查其使用范围。") &
+            LabWorldAddonStatus.Text = If(Result.Choices.Count = 0, "候选目录中没有可识别的附加包。", $"发现 {Result.Choices.Count} 个候选包；请选择后检查其使用范围。") &
+                                       If(Result.IncompleteRoots.Count = 0, "", vbCrLf & "部分目录无法完整读取；显示的列表不完整，写入前会拒绝无法完成的冲突检查。") &
                                        If(IsEligibleWorldTarget(Installation, Root, World), "", vbCrLf & "当前目标仅支持只读查看；世界配置写入尚未验证。")
         Catch ex As Exception
             LabWorldAddonStatus.Text = "读取候选附加包失败：" & ex.Message
@@ -483,13 +497,21 @@ Public Class PageBedrockRight
         End Try
     End Sub
 
-    Private Shared Function CollectWorldAddons(Roots As IReadOnlyList(Of BedrockDataRoot)) As IReadOnlyList(Of WorldAddonChoice)
+    Private Shared Function CollectWorldAddons(Roots As IReadOnlyList(Of BedrockDataRoot)) As WorldAddonList
         Dim Choices As New List(Of WorldAddonChoice)
+        Dim Incomplete As New List(Of String)
         For Each Root In Roots
-            Dim Addons = BedrockAddonCatalog.Read(Root)
-            If Addons.Any(Function(Item) Item.Manifest Is Nothing) Then Throw New InvalidDataException("部分附加包无法识别，不能完整检查冲突。")
+            Dim Addons As IReadOnlyList(Of BedrockInstalledAddon)
+            Try
+                Addons = BedrockAddonCatalog.Read(Root)
+            Catch ex As Exception When TypeOf ex Is IOException OrElse TypeOf ex Is UnauthorizedAccessException
+                Incomplete.Add(Root.Path)
+                Continue For
+            End Try
+            If Addons.Any(Function(Item) Item.Manifest Is Nothing) Then Incomplete.Add(Root.Path)
             For Each Addon In Addons
                 Dim Pack = Addon.Manifest
+                If Pack Is Nothing Then Continue For
                 Dim Resource = Pack.Modules.Contains("resources")
                 Dim Behavior = Pack.Modules.Contains("data")
                 If Resource = Behavior Then Continue For
@@ -497,7 +519,7 @@ Public Class PageBedrockRight
                 Choices.Add(New WorldAddonChoice(Root, Addon))
             Next
         Next
-        Return Choices
+        Return New WorldAddonList(Choices, Incomplete)
     End Function
 
     Private Sub WorldAddonSelectionChanged(sender As Object, e As SelectionChangedEventArgs) Handles ComboWorldAddons.SelectionChanged
@@ -511,6 +533,7 @@ Public Class PageBedrockRight
             Dim Root = TryCast(TryCast(ComboRoots.SelectedItem, MyComboBoxItem)?.Tag, BedrockDataRoot)
             Dim World = TryCast(TryCast(ComboWorlds.SelectedItem, MyComboBoxItem)?.Tag, BedrockWorldInfo)
             If Not IsEligibleWorldTarget(Installation, Root, World) Then LabWorldAddonStatus.Text &= vbCrLf & "当前目标仅支持只读查看；世界配置写入尚未验证。"
+            If WorldAddonScanIncomplete Then LabWorldAddonStatus.Text &= vbCrLf & "部分目录无法完整读取，无法确认包冲突；配置修改已禁用。"
         End If
         RefreshWorldAddonButtons()
     End Sub
@@ -666,8 +689,8 @@ Public Class PageBedrockRight
         BtnReadWorldAddons.IsEnabled = CanRead
         BtnRestoreWorldConfig.IsEnabled = CanWrite
         ComboWorldAddons.IsEnabled = CanRead AndAlso ComboWorldAddons.Items.Count > 0
-        BtnWorldEnableAddon.IsEnabled = CanWrite AndAlso Choice IsNot Nothing
-        BtnWorldDisableAddon.IsEnabled = CanWrite AndAlso Choice IsNot Nothing
+        BtnWorldEnableAddon.IsEnabled = CanWrite AndAlso Not WorldAddonScanIncomplete AndAlso Choice IsNot Nothing
+        BtnWorldDisableAddon.IsEnabled = CanWrite AndAlso Not WorldAddonScanIncomplete AndAlso Choice IsNot Nothing
     End Sub
 
     Private Async Sub BackupClicked(sender As Object, e As EventArgs) Handles BtnBackup.Click
