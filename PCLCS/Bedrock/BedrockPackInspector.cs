@@ -168,9 +168,9 @@ public static class BedrockPackInspector {
             if (part.Length == 0 || part == "." || part == ".." || part.EndsWith(".") || part.EndsWith(" ") ||
                 part.IndexOfAny([':', '*', '?', '"', '<', '>', '|', '\0']) >= 0 || part.Any(char.IsControl))
                 throw new InvalidDataException("压缩包包含不安全的路径。");
-            string device = part.Split('.')[0].ToUpperInvariant();
-            if (device is "CON" or "PRN" or "AUX" or "NUL" ||
-                Regex.IsMatch(device, @"^(COM|LPT)[1-9]$", RegexOptions.CultureInvariant))
+            string device = part.Split('.')[0].TrimEnd(' ').ToUpperInvariant();
+            if (device is "CON" or "PRN" or "AUX" or "NUL" or "CONIN$" or "CONOUT$" ||
+                Regex.IsMatch(device, @"^(COM|LPT)[1-9¹²³]$", RegexOptions.CultureInvariant))
                 throw new InvalidDataException("压缩包包含 Windows 保留名称。");
         }
         return name;

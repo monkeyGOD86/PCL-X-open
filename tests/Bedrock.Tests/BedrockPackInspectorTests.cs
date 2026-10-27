@@ -36,7 +36,7 @@ public sealed class BedrockPackInspectorTests {
     }
 
     public void RejectsUnsafePathsAndDuplicateNames() {
-        foreach (string dangerous in new[] { "../escape.txt", "C:/escape.txt", "folder/file:stream", "folder/CON.txt" })
+        foreach (string dangerous in new[] { "../escape.txt", "C:/escape.txt", "folder/file:stream", "folder/CON.txt", "COM¹.txt", "folder/LPT³", "NUL .txt", "CONOUT$" })
             WithArchive(".mcpack", zip => { Add(zip, "manifest.json", Manifest); Add(zip, dangerous, "x"); }, Reject);
         WithArchive(".mcpack", zip => { Add(zip, "manifest.json", Manifest); Add(zip, "Manifest.JSON", Manifest); }, Reject);
         WithArchive(".mcpack", zip => { Add(zip, "manifest.json", Manifest); Add(zip, "folder", "x"); Add(zip, "folder/file.txt", "x"); }, Reject);

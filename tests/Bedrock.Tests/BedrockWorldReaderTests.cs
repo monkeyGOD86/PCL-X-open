@@ -143,6 +143,18 @@ public sealed class BedrockWorldReaderTests {
         } finally { File.Delete(backup); }
     });
 
+    public void RejectsWindowsDeviceNamesInBackups() => WithWorld((temp, _, _) => {
+        string backup = Path.Combine(temp, "backup.zip");
+        try {
+            using (var file = File.Create(backup))
+            using (var archive = new ZipArchive(file, ZipArchiveMode.Create)) {
+                archive.CreateEntry("world/COM².txt");
+            }
+            try { BedrockWorldBackup.Verify(backup); throw new Exception("reserved device path accepted"); }
+            catch (InvalidDataException ex) { Check(ex.Message.Contains("保留名称"), "device path was not rejected explicitly"); }
+        } finally { File.Delete(backup); }
+    });
+
     public void PreservesStagedFilesWhenRestoreFails() {
         string fixture = Path.Combine(Path.GetTempPath(), "pcl-world-restore-failure-" + Guid.NewGuid().ToString("N"));
         string root = Path.Combine(fixture, "game"), worlds = Path.Combine(root, "minecraftWorlds"), world = Path.Combine(worlds, "original"), backup = Path.Combine(fixture, "backup.zip");

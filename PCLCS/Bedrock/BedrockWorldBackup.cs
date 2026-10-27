@@ -273,8 +273,9 @@ public static class BedrockWorldBackup {
             if (part.Length == 0 || part == "." || part == ".." || part.EndsWith(".") || part.EndsWith(" ") ||
                 part.IndexOfAny([':', '*', '?', '"', '<', '>', '|', '\0']) >= 0 || part.Any(char.IsControl))
                 throw new InvalidDataException("备份包含不安全的路径。");
-            string device = part.Split('.')[0].ToUpperInvariant();
-            if (device is "CON" or "PRN" or "AUX" or "NUL" || System.Text.RegularExpressions.Regex.IsMatch(device, @"^(COM|LPT)[1-9]$"))
+            string device = part.Split('.')[0].TrimEnd(' ').ToUpperInvariant();
+            if (device is "CON" or "PRN" or "AUX" or "NUL" or "CONIN$" or "CONOUT$" ||
+                System.Text.RegularExpressions.Regex.IsMatch(device, @"^(COM|LPT)[1-9¹²³]$", System.Text.RegularExpressions.RegexOptions.CultureInvariant))
                 throw new InvalidDataException("备份包含 Windows 保留名称。");
         }
     }
