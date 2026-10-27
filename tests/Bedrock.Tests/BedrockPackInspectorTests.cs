@@ -120,6 +120,47 @@ public sealed class BedrockPackInspectorTests {
         } finally { Directory.Delete(fixture, true); }
     }
 
+    public void PreparesArchiveAndDetectsLaterChanges() {
+        string fixture = Path.Combine(Path.GetTempPath(), "pcl-bedrock-prepare-test-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(fixture);
+        try {
+            string path = Path.Combine(fixture, "test.mcpack");
+            using (var file = File.Create(path))
+            using (var zip = new ZipArchive(file, ZipArchiveMode.Create)) {
+                Add(zip, "pack/manifest.json", Manifest);
+                Add(zip, "pack/textures/example.txt", "hello");
+            }
+            var prepared = BedrockArchivePreparer.PrepareMcpack(path, fixture);
+            Check(File.ReadAllText(Path.Combine(prepared.Directory, "textures", "example.txt")) == "hello", "archive content missing");
+            Check(prepared.Preview.Pack.Version == "1.2.3", "prepared metadata missing");
+            File.WriteAllText(Path.Combine(prepared.Directory, "textures", "example.txt"), "other");
+            string root = Path.Combine(fixture, "game");
+            Directory.CreateDirectory(Path.Combine(root, "resource_packs"));
+            try {
+                BedrockDirectoryInstaller.Install(new BedrockDataRoot(root, "fixture"), prepared.Directory, prepared.Preview);
+                throw new Exception("changed preparation accepted");
+            } catch (InvalidDataException) { }
+        } finally { Directory.Delete(fixture, true); }
+    }
+
+    public void RejectsArchiveOutsidePackDirectory() {
+        string fixture = Path.Combine(Path.GetTempPath(), "pcl-bedrock-prepare-test-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(fixture);
+        try {
+            string path = Path.Combine(fixture, "test.mcpack");
+            using (var file = File.Create(path))
+            using (var zip = new ZipArchive(file, ZipArchiveMode.Create)) {
+                Add(zip, "pack/manifest.json", Manifest);
+                Add(zip, "outside.txt", "outside");
+            }
+            try {
+                BedrockArchivePreparer.PrepareMcpack(path, fixture);
+                throw new Exception("unrelated file accepted");
+            } catch (InvalidDataException) { }
+            Check(!Directory.GetDirectories(fixture, "pcl-pack-preparation-*").Any(), "invalid archive produced a stage");
+        } finally { Directory.Delete(fixture, true); }
+    }
+
     private static void Add(ZipArchive zip, string name, string text) {
         using var writer = new StreamWriter(zip.CreateEntry(name).Open(), new UTF8Encoding(false));
         writer.Write(text);

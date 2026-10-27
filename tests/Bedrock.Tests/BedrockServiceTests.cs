@@ -28,7 +28,9 @@ public class BedrockServiceTests {
             worldTests.DistinguishesSharedContentDirectory,
             packTests.InspectsUnpackedPackAndDetectsInstalledConflicts,
             packTests.InstallsDirectoryWithoutOverwritingAndRejectsDuplicates,
-            packTests.RejectsChangedPreviewAndUnrecognisedInstalledPack];
+            packTests.RejectsChangedPreviewAndUnrecognisedInstalledPack,
+            packTests.PreparesArchiveAndDetectsLaterChanges,
+            packTests.RejectsArchiveOutsidePackDirectory];
         int failures = 0;
         foreach (var test in cases) {
             try { test(); Console.WriteLine($"PASS {test.Method.Name}"); }

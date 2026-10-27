@@ -149,7 +149,7 @@ public static class BedrockPackInspector {
         return captured?.ToArray();
     }
 
-    private static string ValidateName(ZipArchiveEntry entry) {
+    internal static string ValidateName(ZipArchiveEntry entry) {
         int unixType = (entry.ExternalAttributes >> 16) & 0xf000;
         if (unixType == 0xa000 || (entry.ExternalAttributes & 0x400) != 0)
             throw new InvalidDataException("压缩包包含链接或重解析点。");
