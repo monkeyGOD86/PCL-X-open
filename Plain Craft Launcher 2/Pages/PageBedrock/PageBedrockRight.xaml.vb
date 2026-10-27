@@ -602,7 +602,8 @@ Public Class PageBedrockRight
     Private Shared Function IsValidatedResourceTarget(Installation As BedrockInstallation, Root As BedrockDataRoot) As Boolean
         Return Installation IsNot Nothing AndAlso Root IsNot Nothing AndAlso
                Installation.FamilyName = "Microsoft.MinecraftUWP_8wekyb3d8bbwe" AndAlso
-               Installation.Version = "1.26.5203.0" AndAlso Root.Source = "GDK 共享内容目录"
+               Installation.Version = "1.26.5203.0" AndAlso Installation.Architecture = "x64" AndAlso
+               Installation.AppUserModelId = "Microsoft.MinecraftUWP_8wekyb3d8bbwe!Game" AndAlso Root.Source = "GDK 共享内容目录"
     End Function
 
     Private Sub RefreshInstallPackButton()
@@ -614,7 +615,7 @@ Public Class PageBedrockRight
         If String.IsNullOrEmpty(SelectedPackPath) OrElse Root Is Nothing Then
             LabInstallHint.Text = "请先预览资源包，并在数据与世界中选择目标目录。"
         ElseIf Not IsValidatedResourceTarget(Installation, Root) Then
-            LabInstallHint.Text = "此实验功能仅开放给正式版包 1.26.5203.0 的 GDK 共享目录；其他安装类型和版本尚待验证。"
+            LabInstallHint.Text = "此实验功能仅开放给正式版 x64 包 1.26.5203.0 的 GDK 共享目录；其他安装类型和版本尚待验证。"
         Else
             LabInstallHint.Text = "仅支持资源包；安装前将再次校验内容和目标，并要求确认游戏已关闭且同步完成。"
         End If
