@@ -59,7 +59,8 @@ public class BedrockServiceTests {
             worldPackTests.DisablesOnlySelectedPackAndRejectsTamperedBackup,
             worldPackTests.RejectsBackupInGameDataAndDuplicateUuid,
             worldPackTests.RefusesGlobalOrUnknownResourceScopeInWorld,
-            worldPackTests.BacksUpWorldBeforeConfigChangeAndRestoresBoth];
+            worldPackTests.BacksUpWorldBeforeConfigChangeAndRestoresBoth,
+            worldPackTests.RefusesOccupiedWorldConfigBackupPaths];
         int failures = 0;
         foreach (var test in cases) {
             try { test(); Console.WriteLine($"PASS {test.Method.Name}"); }

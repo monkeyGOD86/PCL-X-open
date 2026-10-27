@@ -11,10 +11,11 @@ public sealed class BedrockWorldPackSnapshot(string worldPath, string kind, bool
     internal byte[] Bytes { get; } = (byte[])bytes.Clone();
 }
 
-public sealed class BedrockWorldPackChange(string? backupPath, string? displacedPath, string newHash) {
+public sealed class BedrockWorldPackChange(string? backupPath, string? displacedPath, string newHash, string? stagePath = null) {
     public string? BackupPath { get; } = backupPath;
     public string? DisplacedPath { get; } = displacedPath;
     public string NewHash { get; } = newHash;
+    public string? StagePath { get; } = stagePath;
 }
 
 /// <summary>Experimental world pack editing. Callers must confirm the root and stop game and synchronization.</summary>
@@ -31,7 +32,11 @@ public static class BedrockWorldPackEditor {
 
     /// <summary>Writes one configuration file after preserving both old and new contents in an external backup.</summary>
     public static BedrockWorldPackChange SetEnabled(BedrockDataRoot root, BedrockWorldInfo world,
-        BedrockWorldPackSnapshot snapshot, BedrockPackInfo pack, bool enabled, string backupDirectory) {
+        BedrockWorldPackSnapshot snapshot, BedrockPackInfo pack, bool enabled, string backupDirectory) =>
+        SetEnabled(root, world, snapshot, pack, enabled, backupDirectory, null);
+
+    internal static BedrockWorldPackChange SetEnabled(BedrockDataRoot root, BedrockWorldInfo world,
+        BedrockWorldPackSnapshot snapshot, BedrockPackInfo pack, bool enabled, string backupDirectory, Action<string>? beforeReplace) {
         string path = ConfigurationPath(root, world, snapshot.Kind);
         if (!string.Equals(Path.GetFullPath(world.Path), snapshot.WorldPath, StringComparison.OrdinalIgnoreCase))
             throw new InvalidDataException("配置预览不属于选定的世界。");
@@ -62,18 +67,27 @@ public static class BedrockWorldPackEditor {
         if (output.Length > MaxBytes) throw new InvalidDataException("修改后的世界配置过大。");
         string id = Guid.NewGuid().ToString("N");
         string backup = Path.Combine(backups, "pcl-world-pack-" + id + ".json");
-        string temporary = Path.Combine(snapshot.WorldPath, ".pcl-pack-write-" + id);
-        string displaced = Path.Combine(snapshot.WorldPath, ".pcl-pack-before-" + id);
+        string stage = Path.Combine(rootPath, ".pcl-world-config-" + id);
+        string temporary = Path.Combine(stage, "replacement.json");
+        string displaced = Path.Combine(stage, "original.json");
         var record = new JObject { ["schemaVersion"] = 1, ["worldPath"] = snapshot.WorldPath, ["kind"] = snapshot.Kind,
             ["existed"] = current.Exists, ["original"] = Convert.ToBase64String(current.Bytes), ["originalHash"] = current.Hash,
             ["updated"] = Convert.ToBase64String(output), ["updatedHash"] = Hash(output) };
         try {
-            if (File.Exists(displaced) || Directory.Exists(displaced)) throw new IOException("原配置副本路径已存在。");
-            WriteNewAndFlush(backup, new UTF8Encoding(false).GetBytes(record.ToString(Formatting.None)));
+            if (File.Exists(stage) || Directory.Exists(stage)) throw new IOException("配置暂存目录已存在。");
+            byte[] recordBytes = new UTF8Encoding(false).GetBytes(record.ToString(Formatting.None));
+            WriteNewAndFlush(backup, recordBytes);
+            if (Hash(ReadBounded(backup, 4 * MaxBytes)) != Hash(recordBytes)) throw new IOException("配置备份校验失败。");
+            Directory.CreateDirectory(stage);
+            BedrockDataRootFinder.EnsureNoReparsePoints(stage);
             WriteNewAndFlush(temporary, output);
             var final = Read(root, world, snapshot.Kind);
             if (final.Exists != current.Exists || final.Hash != current.Hash) throw new IOException("世界配置在写入前发生变化。");
             BedrockDataRootFinder.EnsureNoReparsePoints(snapshot.WorldPath);
+            beforeReplace?.Invoke(stage);
+            BedrockDataRootFinder.EnsureNoReparsePoints(stage);
+            BedrockDataRootFinder.EnsureNoReparsePoints(temporary);
+            if (File.Exists(displaced) || Directory.Exists(displaced)) throw new IOException("原配置副本路径已被占用。");
             if (current.Exists) {
                 File.Replace(temporary, path, displaced);
                 // Keep the exact displaced file, including if another writer raced the last check.
@@ -81,14 +95,16 @@ public static class BedrockWorldPackEditor {
                     throw new IOException("配置在替换时发生变化；被替换文件已保留：" + displaced);
             } else File.Move(temporary, path); // Fails if another writer created the file.
             if (Hash(ReadBounded(path)) != Hash(output)) throw new IOException("写入后的世界配置发生变化，请检查备份。");
-            return new(backup, current.Exists ? displaced : null, Hash(output));
+            return new(backup, current.Exists ? displaced : null, Hash(output), stage);
         } catch (Exception ex) {
-            throw new IOException("配置修改未完成或需要检查；备份：" + backup + "，临时文件：" + temporary + "，原文件副本：" + displaced, ex);
+            throw new IOException("配置修改未完成或需要检查；备份：" + backup + "，暂存目录：" + stage + "，原文件副本：" + displaced, ex);
         }
     }
 
     /// <summary>Restores a verified backup only while the current file still matches the recorded update.</summary>
-    public static string Restore(BedrockDataRoot root, BedrockWorldInfo world, string backupPath) {
+    public static string Restore(BedrockDataRoot root, BedrockWorldInfo world, string backupPath) => Restore(root, world, backupPath, null);
+
+    internal static string Restore(BedrockDataRoot root, BedrockWorldInfo world, string backupPath, Action<string>? beforeReplace) {
         string rootPath = Path.GetFullPath(root.Path).TrimEnd(Path.DirectorySeparatorChar);
         string backup = Path.GetFullPath(backupPath);
         if (Contains(rootPath, backup)) throw new InvalidDataException("备份必须位于所选游戏数据目录之外。");
@@ -121,14 +137,21 @@ public static class BedrockWorldPackEditor {
         var current = Read(root, world, kind);
         if (!current.Exists || current.Hash != Hash(updated)) throw new IOException("世界配置已变化，拒绝覆盖；请手动检查备份。");
         string id = Guid.NewGuid().ToString("N");
-        string temporary = Path.Combine(current.WorldPath, ".pcl-pack-restore-" + id);
-        string displaced = Path.Combine(current.WorldPath, ".pcl-pack-replaced-" + id);
+        string stage = Path.Combine(rootPath, ".pcl-world-config-restore-" + id);
+        string temporary = Path.Combine(stage, "replacement.json");
+        string displaced = Path.Combine(stage, "previous.json");
         try {
-            if (File.Exists(displaced) || Directory.Exists(displaced)) throw new IOException("恢复副本路径已存在。");
+            if (File.Exists(stage) || Directory.Exists(stage)) throw new IOException("恢复暂存目录已存在。");
+            Directory.CreateDirectory(stage);
+            BedrockDataRootFinder.EnsureNoReparsePoints(stage);
             if (existed) WriteNewAndFlush(temporary, original);
             var final = Read(root, world, kind);
             if (!final.Exists || final.Hash != current.Hash) throw new IOException("世界配置在恢复前发生变化。");
             BedrockDataRootFinder.EnsureNoReparsePoints(current.WorldPath);
+            beforeReplace?.Invoke(stage);
+            BedrockDataRootFinder.EnsureNoReparsePoints(stage);
+            if (existed) BedrockDataRootFinder.EnsureNoReparsePoints(temporary);
+            if (File.Exists(displaced) || Directory.Exists(displaced)) throw new IOException("恢复前副本路径已被占用。");
             if (existed) File.Replace(temporary, path, displaced);
             else File.Move(path, displaced); // Preserve the added configuration rather than deleting it.
             if (Hash(ReadBounded(displaced)) != current.Hash)
@@ -137,7 +160,7 @@ public static class BedrockWorldPackEditor {
                 throw new IOException("恢复后的世界配置发生变化，请检查保留的副本。");
             return displaced;
         } catch (Exception ex) {
-            throw new IOException("配置恢复未完成或需要检查；备份：" + backup + "，临时文件：" + temporary + "，恢复前副本：" + displaced, ex);
+            throw new IOException("配置恢复未完成或需要检查；备份：" + backup + "，暂存目录：" + stage + "，恢复前副本：" + displaced, ex);
         }
     }
 
@@ -181,15 +204,15 @@ public static class BedrockWorldPackEditor {
     }
     private static bool VersionsEqual(JArray array, int[] version) =>
         array.Select(value => value.Value<int>()).SequenceEqual(version);
-    private static byte[] ReadBounded(string path) {
+    private static byte[] ReadBounded(string path, int maxBytes = MaxBytes) {
         BedrockDataRootFinder.EnsureNoReparsePoints(path);
         using var file = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
-        if (file.Length > MaxBytes) throw new InvalidDataException("世界配置超过大小限制。");
+        if (file.Length > maxBytes) throw new InvalidDataException("配置或备份超过大小限制。");
         using var content = new MemoryStream();
         byte[] buffer = new byte[4096];
         int count;
         while ((count = file.Read(buffer, 0, buffer.Length)) > 0) {
-            if (content.Length + count > MaxBytes) throw new InvalidDataException("世界配置超过大小限制。");
+            if (content.Length + count > maxBytes) throw new InvalidDataException("配置或备份超过大小限制。");
             content.Write(buffer, 0, count);
         }
         return content.ToArray();

@@ -104,6 +104,34 @@ public sealed class BedrockWorldPackEditorTests {
         Check(File.ReadAllText(config) == original, "config backup did not restore original config");
     });
 
+    public void RefusesOccupiedWorldConfigBackupPaths() => WithFixture((root, world, backup) => {
+        string config = Path.Combine(world.Path, "world_resource_packs.json");
+        File.WriteAllText(config, "[]");
+        var snapshot = BedrockWorldPackEditor.Read(root, world, "resource");
+        string? stage = null;
+        try {
+            BedrockWorldPackEditor.SetEnabled(root, world, snapshot, Pack, true, backup, path => {
+                stage = path;
+                File.WriteAllText(Path.Combine(path, "original.json"), "do not overwrite");
+            });
+            throw new Exception("occupied backup accepted");
+        } catch (IOException) { }
+        Check(File.ReadAllText(config) == "[]" && stage is not null &&
+            File.ReadAllText(Path.Combine(stage, "original.json")) == "do not overwrite", "preexisting data was overwritten");
+        var change = BedrockWorldPackEditor.SetEnabled(root, world, snapshot, Pack, true, backup);
+        string updated = File.ReadAllText(config);
+        string? restoreStage = null;
+        try {
+            BedrockWorldPackEditor.Restore(root, world, change.BackupPath!, path => {
+                restoreStage = path;
+                File.WriteAllText(Path.Combine(path, "previous.json"), "keep restore file");
+            });
+            throw new Exception("occupied restore backup accepted");
+        } catch (IOException) { }
+        Check(File.ReadAllText(config) == updated && restoreStage is not null &&
+            File.ReadAllText(Path.Combine(restoreStage, "previous.json")) == "keep restore file", "restore overwrote existing data");
+    });
+
     private static void WithFixture(Action<BedrockDataRoot, BedrockWorldInfo, string> run) {
         string fixture = Path.Combine(Path.GetTempPath(), "pcl-world-config-test-" + Guid.NewGuid().ToString("N"));
         string root = Path.Combine(fixture, "game"), world = Path.Combine(root, "minecraftWorlds", "test"), backup = Path.Combine(fixture, "backups");

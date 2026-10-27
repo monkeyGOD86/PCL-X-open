@@ -577,7 +577,8 @@ Public Class PageBedrockRight
                                             End Function)
                 LabWorldAddonStatus.Text = If(Change.BackupPath Is Nothing, "配置没有变化。", "配置已写入；游戏是否识别需自行确认。") &
                                            vbCrLf & "世界备份：" & FullBackup & If(Change.BackupPath Is Nothing, "", vbCrLf & "配置备份：" & Change.BackupPath) &
-                                           If(Change.DisplacedPath Is Nothing, "", vbCrLf & "原配置副本：" & Change.DisplacedPath) & vbCrLf & "请重新读取世界列表。"
+                                           If(Change.DisplacedPath Is Nothing, "", vbCrLf & "原配置副本：" & Change.DisplacedPath) &
+                                           If(Change.StagePath Is Nothing, "", vbCrLf & "暂存目录：" & Change.StagePath) & vbCrLf & "请重新读取世界列表。"
             End Using
         Catch ex As Exception
             LabWorldAddonStatus.Text = "世界配置操作未完成：" & ex.Message & If(FullBackup Is Nothing, "", vbCrLf & "世界备份路径：" & FullBackup)
