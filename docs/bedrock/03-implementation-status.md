@@ -31,5 +31,6 @@
 - 世界恢复在目标数据根下建立临时目录，校验完成后同卷移动到新世界目录；进程中断可能留下 `.pcl-restore-*` 临时目录，不会自动删除。常见进程检查和用户确认无法证明云同步完成或覆盖所有游戏进程；当前未在真实游戏存档上测试备份或恢复，也未验证游戏能否读取恢复的新世界。
 - Minecraft 官方文档将 GDK [共享创作者内容目录](https://learn.microsoft.com/en-us/minecraft/creator/documents/gdkpcprojectfolder) 与 [按用户保存的世界目录](https://github.com/MicrosoftDocs/minecraft-creator/blob/main/creator/Documents/BedrockServer/getting-started.md) 区分；共享目录不得作为世界恢复目标。具体用户目录仍需用户确认。
 - UWP 旧版本、Preview、未安装/授权失败、服务损坏及多种 Windows 环境尚未做真实设备验证。`App` 入口依据历史包惯例识别，兼容性尚未实测。
+- 现有“隐藏所有顶部页面”设置仍按原逻辑隐藏整个顶部导航栏，其中也包括新增的基岩版入口；尚未设计独立入口或兼容的显示设置。最小窗口宽度及隐藏页面组合也需要界面回归。
 - 历史版本、多实例和原生 Mod 仍属独立验证项；证据、限制及验证矩阵见 [04-version-instance-research.md](04-version-instance-research.md)。许可风险及本次直接依赖的清点见 [05-license-inventory.md](05-license-inventory.md)；当前上游许可全文和完整第三方物料仍需在发布前核对。
 - 已完成与缺失的验证按功能列于 [06-test-matrix.md](06-test-matrix.md)，避免把部分环境或静态测试推广为全面验收。
