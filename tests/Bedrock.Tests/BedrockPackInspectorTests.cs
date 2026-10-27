@@ -289,7 +289,10 @@ public sealed class BedrockPackInspectorTests {
             var selected = BedrockAddonCatalog.Read(root).Single();
             var removal = BedrockAddonRemoval.Remove(root, selected, BedrockDirectoryInstaller.Preview(pack), backup, [root]);
             Check(!Directory.Exists(pack) && File.ReadAllText(Path.Combine(removal.BackupPath, "data.txt")) == "user data", "backup or quarantine missing");
+            var listed = BedrockAddonRemoval.List(root).Single();
+            Check(listed.State == "已隔离" && listed.OriginalPath == pack && listed.BackupPath == removal.BackupPath, "removal not listed");
             Check(BedrockAddonRemoval.Restore(root, removal.TransactionPath) == pack, "original location not restored");
+            Check(BedrockAddonRemoval.List(root).Single().State == "原位置存在", "restored removal state not reported");
             Check(File.ReadAllText(Path.Combine(pack, "data.txt")) == "user data" && Directory.Exists(removal.BackupPath), "restore lost data");
         } finally { Directory.Delete(fixture, true); }
     }
@@ -332,6 +335,7 @@ public sealed class BedrockPackInspectorTests {
             var removal = BedrockAddonRemoval.Remove(root, selected, BedrockDirectoryInstaller.Preview(pack), backup, [root]);
             string journal = Path.Combine(removal.TransactionPath, "journal.json");
             File.WriteAllText(journal, File.ReadAllText(journal).Replace("resource_packs/package", "../outside"));
+            Check(BedrockAddonRemoval.List(root).Single().State == "记录不可读取", "tampered removal was not reported");
             try { BedrockAddonRemoval.Restore(root, removal.TransactionPath); throw new Exception("tampered journal accepted"); }
             catch (InvalidDataException) { }
             Check(Directory.Exists(Path.Combine(removal.TransactionPath, "content")) && Directory.Exists(removal.BackupPath), "tampered journal lost data");

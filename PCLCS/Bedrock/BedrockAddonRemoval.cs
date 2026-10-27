@@ -7,10 +7,40 @@ public sealed class BedrockRemovedAddon(string transactionPath, string backupPat
     public string BackupPath { get; } = backupPath;
 }
 
+public sealed class BedrockRemovalInfo(string path, string state, string? originalPath, string? backupPath, string? error) {
+    public string Path { get; } = path;
+    public string State { get; } = state;
+    public string? OriginalPath { get; } = originalPath;
+    public string? BackupPath { get; } = backupPath;
+    public string? Error { get; } = error;
+}
+
 /// <summary>Experimental removal by same-volume quarantine with a separate verified backup.</summary>
 public static class BedrockAddonRemoval {
     private const string Prefix = ".pcl-addon-removal-";
     private static readonly string[] Categories = ["resource_packs", "behavior_packs", "development_resource_packs", "development_behavior_packs"];
+
+    /// <summary>Lists path-based removal states; restoration independently validates the stored data.</summary>
+    public static IReadOnlyList<BedrockRemovalInfo> List(BedrockDataRoot root) {
+        string rootPath = NormalizeRoot(root);
+        using var rootLock = BedrockRootLock.Acquire(rootPath);
+        var result = new List<BedrockRemovalInfo>();
+        foreach (string candidate in Directory.EnumerateDirectories(rootPath, Prefix + "*")) {
+            if (result.Count >= 1024) throw new InvalidDataException("移除事务数量超过读取限制。");
+            try {
+                var (stage, destination, _, record) = ReadJournal(rootPath, candidate);
+                string content = Path.Combine(stage, "content");
+                bool original = Directory.Exists(destination), quarantined = Directory.Exists(content);
+                string state = File.Exists(destination) || File.Exists(content) || original && quarantined ? "路径冲突" :
+                    quarantined ? "已隔离" : original ? "原位置存在" : "内容缺失";
+                result.Add(new(stage, state, destination, record.Value<string>("backupPath"), null));
+            } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or DecoderFallbackException or
+                                       InvalidDataException or FormatException or InvalidCastException or OverflowException or ArgumentException) {
+                result.Add(new(candidate, "记录不可读取", null, null, ex.Message));
+            }
+        }
+        return result;
+    }
 
     public static BedrockRemovedAddon Remove(BedrockDataRoot root, BedrockInstalledAddon selected,
         BedrockDirectoryPreview confirmed, string backupParent, IReadOnlyList<BedrockDataRoot> worldRoots) {
@@ -72,6 +102,31 @@ public static class BedrockAddonRemoval {
     public static string Restore(BedrockDataRoot root, string transaction) {
         string rootPath = NormalizeRoot(root);
         using var rootLock = BedrockRootLock.Acquire(rootPath);
+        var (stage, destination, uuid, record) = ReadJournal(rootPath, transaction);
+        string relative = record.Value<string>("relativePath")!;
+        if (File.Exists(destination) || Directory.Exists(destination)) throw new IOException("原位置已被占用，不能覆盖。");
+        string parent = Path.GetDirectoryName(destination)!;
+        BedrockDataRootFinder.EnsureNoReparsePoints(parent);
+        string content = Path.Combine(stage, "content");
+        Verify(content, uuid, record.Value<string>("version")!, record.Value<string>("fingerprint")!);
+        var catalog = BedrockAddonCatalog.Read(root);
+        if (catalog.Any(item => item.Manifest is not null && item.Manifest.Uuid == uuid))
+            throw new InvalidDataException("目标中已存在相同 UUID 的包，不能自动恢复。");
+        // An emptied version-container is expected to be unrecognized after its only child is moved.
+        bool emptyVersionContainer = relative.Split('/').Length == 3 && !File.Exists(Path.Combine(parent, "manifest.json")) &&
+            !Directory.EnumerateDirectories(parent).Any();
+        if (catalog.Any(item => item.Manifest is null && !(emptyVersionContainer &&
+                string.Equals(Path.GetFullPath(item.Path), parent, StringComparison.OrdinalIgnoreCase))))
+            throw new InvalidDataException("现有包无法全部识别，无法检查冲突。");
+        BedrockDataRootFinder.EnsureNoReparsePoints(parent);
+        BedrockDataRootFinder.EnsureNoReparsePoints(content);
+        Directory.Move(content, destination);
+        try { Verify(destination, uuid, record.Value<string>("version")!, record.Value<string>("fingerprint")!); }
+        catch (Exception ex) { throw new IOException("恢复后的内容发生变化，请检查原位置与备份：" + destination, ex); }
+        return destination;
+    }
+
+    private static (string Stage, string Destination, Guid Uuid, JObject Record) ReadJournal(string rootPath, string transaction) {
         string stage = Path.GetFullPath(transaction).TrimEnd(Path.DirectorySeparatorChar);
         string name = Path.GetFileName(stage);
         if (!string.Equals(Path.GetDirectoryName(stage), rootPath, StringComparison.OrdinalIgnoreCase) ||
@@ -95,26 +150,7 @@ public static class BedrockAddonRemoval {
             string.IsNullOrEmpty(record.Value<string>("version")) ||
             !System.Text.RegularExpressions.Regex.IsMatch(record.Value<string>("fingerprint") ?? "", "^[0-9A-F]{64}$"))
             throw new InvalidDataException("移除事务记录无效。");
-        if (File.Exists(destination) || Directory.Exists(destination)) throw new IOException("原位置已被占用，不能覆盖。");
-        string parent = Path.GetDirectoryName(destination)!;
-        BedrockDataRootFinder.EnsureNoReparsePoints(parent);
-        string content = Path.Combine(stage, "content");
-        Verify(content, uuid, record.Value<string>("version")!, record.Value<string>("fingerprint")!);
-        var catalog = BedrockAddonCatalog.Read(root);
-        if (catalog.Any(item => item.Manifest is not null && item.Manifest.Uuid == uuid))
-            throw new InvalidDataException("目标中已存在相同 UUID 的包，不能自动恢复。");
-        // An emptied version-container is expected to be unrecognized after its only child is moved.
-        bool emptyVersionContainer = relative.Split('/').Length == 3 && !File.Exists(Path.Combine(parent, "manifest.json")) &&
-            !Directory.EnumerateDirectories(parent).Any();
-        if (catalog.Any(item => item.Manifest is null && !(emptyVersionContainer &&
-                string.Equals(Path.GetFullPath(item.Path), parent, StringComparison.OrdinalIgnoreCase))))
-            throw new InvalidDataException("现有包无法全部识别，无法检查冲突。");
-        BedrockDataRootFinder.EnsureNoReparsePoints(parent);
-        BedrockDataRootFinder.EnsureNoReparsePoints(content);
-        Directory.Move(content, destination);
-        try { Verify(destination, uuid, record.Value<string>("version")!, record.Value<string>("fingerprint")!); }
-        catch (Exception ex) { throw new IOException("恢复后的内容发生变化，请检查原位置与备份：" + destination, ex); }
-        return destination;
+        return (stage, destination, uuid, record);
     }
 
     private static void Verify(string directory, Guid uuid, string version, string fingerprint) {

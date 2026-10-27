@@ -77,11 +77,13 @@ Public Class PageBedrockRight
         ComboWorlds.Items.Clear()
         ComboAddons.Items.Clear()
         ComboTransactions.Items.Clear()
+        ComboRemovals.Items.Clear()
         LabWorldStatus.Text = ""
         LabWorldDetails.Text = ""
         LabAddonStatus.Text = ""
         LabAddonDetails.Text = ""
         LabTransactionStatus.Text = ""
+        LabRemovalStatus.Text = ""
         LabRootsStatus.Text = "正在查找候选数据目录…"
         SetBusy(True)
         Try
@@ -107,15 +109,75 @@ Public Class PageBedrockRight
         BtnRestore.IsEnabled = Not IsBusy AndAlso Root IsNot Nothing AndAlso Root.SupportsWorlds
         BtnListAddons.IsEnabled = Not IsBusy AndAlso Root IsNot Nothing
         BtnListTransactions.IsEnabled = Not IsBusy AndAlso Root IsNot Nothing
+        BtnListRemovals.IsEnabled = Not IsBusy AndAlso Root IsNot Nothing
         ComboWorlds.Items.Clear()
         ComboAddons.Items.Clear()
         ComboTransactions.Items.Clear()
+        ComboRemovals.Items.Clear()
         LabWorldStatus.Text = If(Root IsNot Nothing AndAlso Not Root.SupportsWorlds, "共享内容目录不用于管理账户世界。", "")
         LabWorldDetails.Text = ""
         LabAddonStatus.Text = ""
         LabAddonDetails.Text = ""
         LabTransactionStatus.Text = ""
+        LabRemovalStatus.Text = ""
         RefreshInstallPackButton()
+    End Sub
+
+    Private Async Sub ListRemovalsClicked(sender As Object, e As EventArgs) Handles BtnListRemovals.Click
+        Dim Root = TryCast(TryCast(ComboRoots.SelectedItem, MyComboBoxItem)?.Tag, BedrockDataRoot)
+        If IsBusy OrElse Root Is Nothing Then Return
+        ComboRemovals.Items.Clear()
+        LabRemovalStatus.Text = "正在读取移除记录…"
+        SetBusy(True)
+        Try
+            Dim Removals = Await Task.Run(Function() BedrockAddonRemoval.List(Root))
+            For Each Removal In Removals
+                ComboRemovals.Items.Add(New MyComboBoxItem With {.Content = Removal.State & " · " & Path.GetFileName(Removal.Path), .Tag = Removal})
+            Next
+            LabRemovalStatus.Text = If(Removals.Count = 0, "此目录没有发现移除记录。", $"发现 {Removals.Count} 条移除记录；状态基于路径，恢复时会校验内容。")
+        Catch ex As Exception
+            LabRemovalStatus.Text = "读取移除记录失败：" & ex.Message
+            Logger.Warn(ex, "读取基岩版附加包移除记录失败")
+        Finally
+            SetBusy(False)
+        End Try
+    End Sub
+
+    Private Sub RemovalSelectionChanged(sender As Object, e As SelectionChangedEventArgs) Handles ComboRemovals.SelectionChanged
+        Dim Removal = TryCast(TryCast(ComboRemovals.SelectedItem, MyComboBoxItem)?.Tag, BedrockRemovalInfo)
+        BtnRestoreRemoval.IsEnabled = Not IsBusy AndAlso Removal IsNot Nothing AndAlso Removal.Error Is Nothing AndAlso Removal.State = "已隔离"
+        If Removal IsNot Nothing Then
+            LabRemovalStatus.Text = Removal.State & vbCrLf & "事务：" & Removal.Path & vbCrLf & "原位置：" & If(Removal.OriginalPath, "未知") &
+                                    vbCrLf & "外部备份：" & If(Removal.BackupPath, "未知") & If(Removal.Error Is Nothing, "", vbCrLf & Removal.Error)
+        End If
+    End Sub
+
+    Private Async Sub RestoreRemovalClicked(sender As Object, e As EventArgs) Handles BtnRestoreRemoval.Click
+        Dim Root = TryCast(TryCast(ComboRoots.SelectedItem, MyComboBoxItem)?.Tag, BedrockDataRoot)
+        Dim Removal = TryCast(TryCast(ComboRemovals.SelectedItem, MyComboBoxItem)?.Tag, BedrockRemovalInfo)
+        If IsBusy OrElse Root Is Nothing OrElse Removal Is Nothing OrElse Removal.State <> "已隔离" Then Return
+        If IsKnownBedrockProcessRunning() Then
+            MyMsgBox("请先关闭 Minecraft 基岩版并等待同步完成。", "恢复附加包")
+            Return
+        End If
+        If MyMsgBox("请确认游戏已关闭且同步完成。" & vbCrLf & vbCrLf & "数据目录：" & Root.Path & vbCrLf &
+                    "恢复到：" & Removal.OriginalPath & vbCrLf & "事务：" & Removal.Path & vbCrLf &
+                    "恢复前会校验内容及冲突，不覆盖已有文件。外部备份会保留。", "确认恢复附加包", "恢复", "取消") <> 1 Then Return
+        SetBusy(True)
+        LabRemovalStatus.Text = "正在校验并恢复附加包…"
+        Try
+            Dim Restored = Await Task.Run(Function()
+                                              If IsKnownBedrockProcessRunning() Then Throw New InvalidOperationException("Minecraft 正在运行，请关闭后重试。")
+                                              Return BedrockAddonRemoval.Restore(Root, Removal.Path)
+                                          End Function)
+            ComboRemovals.Items.Clear()
+            LabRemovalStatus.Text = "已恢复到原位置；请在游戏中确认。" & vbCrLf & Restored
+        Catch ex As Exception
+            LabRemovalStatus.Text = "恢复未完成：" & ex.Message
+            Logger.Warn(ex, "恢复已移除的基岩版附加包失败")
+        Finally
+            SetBusy(False)
+        End Try
     End Sub
 
     Private Async Sub ListTransactionsClicked(sender As Object, e As EventArgs) Handles BtnListTransactions.Click
@@ -545,6 +607,10 @@ Public Class PageBedrockRight
         BtnRestore.IsEnabled = Not Value AndAlso Root IsNot Nothing AndAlso Root.SupportsWorlds
         BtnListAddons.IsEnabled = Not Value AndAlso Root IsNot Nothing
         BtnListTransactions.IsEnabled = Not Value AndAlso Root IsNot Nothing
+        BtnListRemovals.IsEnabled = Not Value AndAlso Root IsNot Nothing
+        ComboRemovals.IsEnabled = Not Value AndAlso ComboRemovals.Items.Count > 0
+        Dim Removal = TryCast(TryCast(ComboRemovals.SelectedItem, MyComboBoxItem)?.Tag, BedrockRemovalInfo)
+        BtnRestoreRemoval.IsEnabled = Not Value AndAlso Removal IsNot Nothing AndAlso Removal.Error Is Nothing AndAlso Removal.State = "已隔离"
         ComboTransactions.IsEnabled = Not Value AndAlso ComboTransactions.Items.Count > 0
         Dim TransactionItem = TryCast(ComboTransactions.SelectedItem, MyComboBoxItem)
         Dim Transaction = TryCast(TransactionItem?.Tag, BedrockAddonTransactionInfo)
