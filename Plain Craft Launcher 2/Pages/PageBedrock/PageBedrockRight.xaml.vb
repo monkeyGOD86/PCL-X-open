@@ -4,6 +4,8 @@ Public Class PageBedrockRight
     Private ReadOnly Service As New BedrockService(New WindowsBedrockPackageCatalog(), New WindowsBedrockActivator())
     Private HasLoaded As Boolean
     Private IsBusy As Boolean
+    Private SelectedPackPath As String
+    Private SelectedPackIsDirectory As Boolean
 
     Private Async Sub PageLoaded(sender As Object, e As RoutedEventArgs) Handles Me.Loaded
         If HasLoaded Then Return
@@ -58,7 +60,11 @@ Public Class PageBedrockRight
         End If
         BtnStart.IsEnabled = Not IsBusy AndAlso Installation IsNot Nothing AndAlso Installation.CanLaunch
         BtnWorlds.IsEnabled = Not IsBusy AndAlso Installation IsNot Nothing
-        If CardWorlds IsNot Nothing Then CardWorlds.Visibility = Visibility.Collapsed
+        If CardWorlds IsNot Nothing Then
+            CardWorlds.Visibility = Visibility.Collapsed
+            ComboRoots.Items.Clear()
+        End If
+        RefreshInstallPackButton()
     End Sub
 
     Private Async Sub WorldsClicked(sender As Object, e As EventArgs) Handles BtnWorlds.Click
@@ -109,6 +115,7 @@ Public Class PageBedrockRight
         LabAddonStatus.Text = ""
         LabAddonDetails.Text = ""
         LabTransactionStatus.Text = ""
+        RefreshInstallPackButton()
     End Sub
 
     Private Async Sub ListTransactionsClicked(sender As Object, e As EventArgs) Handles BtnListTransactions.Click
@@ -371,11 +378,14 @@ Public Class PageBedrockRight
         Using Dialog As New System.Windows.Forms.FolderBrowserDialog With {.Description = "选择包含 manifest.json 的附加包文件夹", .ShowNewFolderButton = False}
             If Dialog.ShowDialog() <> System.Windows.Forms.DialogResult.OK Then Return
             Dim Folder = Dialog.SelectedPath
+            SelectedPackPath = Nothing
             SetBusy(True)
             LabPackInfo.Text = "正在检查附加包文件夹…"
             Try
                 Dim Pack = Await Task.Run(Function() BedrockPackInspector.InspectDirectory(Folder))
-                LabPackInfo.Text = DescribePacks({Pack}) & vbCrLf & "已完成只读预览；导入功能尚待验证。"
+                SelectedPackPath = Folder
+                SelectedPackIsDirectory = True
+                LabPackInfo.Text = DescribePacks({Pack}) & vbCrLf & "已完成只读预览。实验性安装需先选择已验证的目标目录。"
             Catch ex As Exception
                 LabPackInfo.Text = "无法预览附加包文件夹：" & ex.Message
                 Logger.Warn(ex, "基岩版附加包预览失败")
@@ -387,17 +397,124 @@ Public Class PageBedrockRight
 
     Public Async Sub PreviewPackage(FilePath As String)
         If IsBusy Then Return
+        SelectedPackPath = Nothing
         SetBusy(True)
         LabPackInfo.Text = "正在检查附加包…"
         Try
             Dim Packs = Await Task.Run(Function() BedrockPackInspector.Inspect(FilePath))
-            LabPackInfo.Text = DescribePacks(Packs) & vbCrLf & "已完成只读预览；导入功能尚待验证。"
+            SelectedPackPath = FilePath
+            SelectedPackIsDirectory = False
+            LabPackInfo.Text = DescribePacks(Packs) & vbCrLf & "已完成只读预览。实验性安装需先选择已验证的目标目录。"
         Catch ex As Exception
             LabPackInfo.Text = "无法预览附加包：" & ex.Message
             Logger.Warn(ex, "基岩版附加包预览失败")
         Finally
             SetBusy(False)
         End Try
+    End Sub
+
+    Private Async Sub InstallPackClicked(sender As Object, e As EventArgs) Handles BtnInstallPack.Click
+        Dim Installation = TryCast(TryCast(ComboInstall.SelectedItem, MyComboBoxItem)?.Tag, BedrockInstallation)
+        Dim Root = TryCast(TryCast(ComboRoots.SelectedItem, MyComboBoxItem)?.Tag, BedrockDataRoot)
+        Dim Source = SelectedPackPath
+        Dim IsDirectory = SelectedPackIsDirectory
+        If IsBusy OrElse String.IsNullOrEmpty(Source) OrElse Not IsValidatedResourceTarget(Installation, Root) Then Return
+        If IsKnownBedrockProcessRunning() Then
+            MyMsgBox("请先关闭 Minecraft 基岩版并等待同步完成。", "安装资源包")
+            Return
+        End If
+        SetBusy(True)
+        Dim Transaction As String = Nothing
+        Try
+            LabPackInfo.Text = "正在准备并校验资源包…"
+            Dim Packs = Await Task.Run(Function() PrepareResourcePacks(Source, IsDirectory))
+            Dim Roots = Await Task.Run(Function() ValidateInstallTarget(Installation, Root))
+            Dim Scope = String.Join(vbCrLf, Roots.Select(Function(Item) Item.Path))
+            If MyMsgBox("请确认游戏已关闭且同步完成。此功能仅在一台设备上验证过资源包布局。" & vbCrLf & vbCrLf &
+                        "目标目录：" & Root.Path & vbCrLf & "检查目录：" & vbCrLf & Scope & vbCrLf & vbCrLf &
+                        DescribePacks(Packs.Select(Function(Item) Item.Preview.Pack)) & vbCrLf &
+                        "将创建可恢复事务和新包目录，不覆盖现有包。游戏是否识别需自行确认。", "确认实验性安装", "安装", "取消") <> 1 Then
+                LabPackInfo.Text = "已取消安装；准备目录已保留：" & vbCrLf & String.Join(vbCrLf, Packs.Select(Function(Item) Item.Directory))
+                Return
+            End If
+            LabPackInfo.Text = "正在创建可恢复事务…"
+            Transaction = Await Task.Run(Function()
+                                             If IsKnownBedrockProcessRunning() Then Throw New InvalidOperationException("Minecraft 正在运行，请关闭后重试。")
+                                             Dim CurrentRoots = ValidateInstallTarget(Installation, Root)
+                                             If Not SameRoots(Roots, CurrentRoots) Then Throw New InvalidOperationException("数据目录范围已变化，请重新确认。")
+                                             Return BedrockAddonTransaction.Prepare(Root, Packs, CurrentRoots)
+                                         End Function)
+            LabPackInfo.Text = "正在提交资源包；事务目录：" & Transaction
+            Await Task.Run(Sub()
+                               If IsKnownBedrockProcessRunning() Then Throw New InvalidOperationException("Minecraft 正在运行，请关闭后重试。")
+                               Dim CurrentRoots = ValidateInstallTarget(Installation, Root)
+                               If Not SameRoots(Roots, CurrentRoots) Then Throw New InvalidOperationException("数据目录范围已变化，请重新确认。")
+                               BedrockAddonTransaction.Commit(Root, Transaction, CurrentRoots)
+                           End Sub)
+            LabPackInfo.Text = "资源包文件已放置。游戏是否识别或启用需在游戏中确认。事务目录：" & Transaction
+        Catch ex As Exception
+            LabPackInfo.Text = "安装未完成：" & ex.Message & If(Transaction Is Nothing, "", vbCrLf & "保留事务并在数据页面检查恢复：" & Transaction)
+            Logger.Warn(ex, "实验性基岩版资源包安装失败")
+        Finally
+            SetBusy(False)
+        End Try
+    End Sub
+
+    Private Shared Function PrepareResourcePacks(Source As String, IsDirectory As Boolean) As IReadOnlyList(Of BedrockPreparedPack)
+        Dim Packs As IReadOnlyList(Of BedrockPreparedPack)
+        If IsDirectory Then
+            Packs = {New BedrockPreparedPack(Source, BedrockDirectoryInstaller.Preview(Source))}
+        ElseIf Path.GetExtension(Source).Equals(".mcpack", StringComparison.OrdinalIgnoreCase) Then
+            Packs = {BedrockArchivePreparer.PrepareMcpack(Source, Path.GetTempPath())}
+        ElseIf Path.GetExtension(Source).Equals(".mcaddon", StringComparison.OrdinalIgnoreCase) Then
+            Packs = BedrockArchivePreparer.PrepareMcaddon(Source, Path.GetTempPath()).Packs
+        Else
+            Throw New InvalidDataException("不支持的附加包格式。")
+        End If
+        If Packs.Any(Function(Item) Not Item.Preview.Pack.Modules.Contains("resources") OrElse Item.Preview.Pack.Modules.Contains("data")) Then
+            Throw New InvalidDataException("当前实验性安装仅支持资源包；行为包及混合包尚未验证。准备目录已保留：" &
+                                           vbCrLf & String.Join(vbCrLf, Packs.Select(Function(Item) Item.Directory)))
+        End If
+        Return Packs
+    End Function
+
+    Private Function ValidateInstallTarget(Installation As BedrockInstallation, Root As BedrockDataRoot) As IReadOnlyList(Of BedrockDataRoot)
+        Dim Result = Service.Detect()
+        If Result.Error IsNot Nothing OrElse Not Result.Installations.Any(Function(Item) Item.FamilyName = Installation.FamilyName AndAlso
+            Item.PackageFullName = Installation.PackageFullName AndAlso Item.AppUserModelId = Installation.AppUserModelId) Then
+            Throw New InvalidOperationException("游戏注册状态已变化，请刷新后重试。")
+        End If
+        Dim Roots = (New BedrockDataRootFinder()).Find(Installation)
+        If Not Roots.Any(Function(Item) String.Equals(Item.Path, Root.Path, StringComparison.OrdinalIgnoreCase) AndAlso Item.Source = Root.Source) Then
+            Throw New InvalidOperationException("目标数据目录已变化，请重新选择。")
+        End If
+        Return Roots
+    End Function
+
+    Private Shared Function SameRoots(First As IReadOnlyList(Of BedrockDataRoot), Second As IReadOnlyList(Of BedrockDataRoot)) As Boolean
+        Return First.Select(Function(Item) Item.Path).OrderBy(Function(Item) Item, StringComparer.OrdinalIgnoreCase).
+            SequenceEqual(Second.Select(Function(Item) Item.Path).OrderBy(Function(Item) Item, StringComparer.OrdinalIgnoreCase), StringComparer.OrdinalIgnoreCase)
+    End Function
+
+    Private Shared Function IsValidatedResourceTarget(Installation As BedrockInstallation, Root As BedrockDataRoot) As Boolean
+        Return Installation IsNot Nothing AndAlso Root IsNot Nothing AndAlso
+               Installation.FamilyName = "Microsoft.MinecraftUWP_8wekyb3d8bbwe" AndAlso
+               Installation.Version = "1.26.5203.0" AndAlso Root.Source = "GDK 共享内容目录"
+    End Function
+
+    Private Sub RefreshInstallPackButton()
+        If BtnInstallPack Is Nothing OrElse ComboInstall Is Nothing OrElse ComboRoots Is Nothing Then Return
+        Dim Installation = TryCast(TryCast(ComboInstall.SelectedItem, MyComboBoxItem)?.Tag, BedrockInstallation)
+        Dim Root = TryCast(TryCast(ComboRoots.SelectedItem, MyComboBoxItem)?.Tag, BedrockDataRoot)
+        BtnInstallPack.IsEnabled = Not IsBusy AndAlso Not String.IsNullOrEmpty(SelectedPackPath) AndAlso IsValidatedResourceTarget(Installation, Root)
+        If LabInstallHint Is Nothing Then Return
+        If String.IsNullOrEmpty(SelectedPackPath) OrElse Root Is Nothing Then
+            LabInstallHint.Text = "请先预览资源包，并在数据与世界中选择目标目录。"
+        ElseIf Not IsValidatedResourceTarget(Installation, Root) Then
+            LabInstallHint.Text = "此实验功能仅开放给正式版包 1.26.5203.0 的 GDK 共享目录；其他安装类型和版本尚待验证。"
+        Else
+            LabInstallHint.Text = "仅支持资源包；安装前将再次校验内容和目标，并要求确认游戏已关闭且同步完成。"
+        End If
     End Sub
 
     Private Shared Function DescribePacks(Packs As IEnumerable(Of BedrockPackInfo)) As String
@@ -437,5 +554,6 @@ Public Class PageBedrockRight
         Dim WorldItem = TryCast(ComboWorlds.SelectedItem, MyComboBoxItem)
         Dim World = TryCast(WorldItem?.Tag, BedrockWorldInfo)
         BtnBackup.IsEnabled = Not Value AndAlso World IsNot Nothing AndAlso World.HasLevelData
+        RefreshInstallPackButton()
     End Sub
 End Class

@@ -45,6 +45,7 @@ public class BedrockServiceTests {
             packTests.ChecksConflictsAcrossExplicitRootsAndReportsIncompleteScan,
             packTests.TransactionRechecksCrossRootScopeBeforeCommit,
             packTests.LegacyTransactionCanBeRecoveredButNotCommitted,
+            packTests.PreparesArchiveThenInstallsAndRecoversIt,
             worldPackTests.UpdatesAndRestoresWorldConfigWithoutDiscardingFields,
             worldPackTests.CreatesAndRevertsMissingConfigWithoutDeletingIt,
             worldPackTests.RejectsStaleSnapshotAndConflictingVersion,

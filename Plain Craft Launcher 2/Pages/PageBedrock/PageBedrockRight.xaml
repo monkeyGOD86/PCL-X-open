@@ -18,12 +18,14 @@
             <local:MyCard Title="内容管理" Margin="0,0,0,15">
                 <StackPanel Margin="21,40,21,20">
                     <TextBlock Text="选择或拖入 .mcpack / .mcaddon 文件，查看包信息。" TextWrapping="Wrap" />
-                    <TextBlock x:Name="LabPackInfo" Text="附加包导入和世界配置将在完成数据保护验证后开放。" Margin="0,10,0,0" TextWrapping="Wrap" />
+                    <TextBlock x:Name="LabPackInfo" Text="先预览资源包，再在数据与世界中选择目标目录。实验性安装目前仅限已验证的正式版包版本和 GDK 共享目录。" Margin="0,10,0,0" TextWrapping="Wrap" />
                     <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
                         <local:MyButton x:Name="BtnAddons" Text="预览附加包" Height="35" MinWidth="120" />
                         <local:MyButton x:Name="BtnFolder" Text="预览包文件夹" Height="35" MinWidth="120" Margin="10,0,0,0" />
                         <local:MyButton x:Name="BtnWorlds" Text="数据与世界" Height="35" MinWidth="120" Margin="10,0,0,0" IsEnabled="False" />
                     </StackPanel>
+                    <local:MyButton x:Name="BtnInstallPack" Text="安装已预览的资源包（实验）" Height="35" Width="230" HorizontalAlignment="Left" Margin="0,10,0,0" IsEnabled="False" />
+                    <TextBlock x:Name="LabInstallHint" Text="请先预览资源包并选择目标数据目录。" Margin="0,8,0,0" TextWrapping="Wrap" />
                 </StackPanel>
             </local:MyCard>
             <local:MyCard x:Name="CardWorlds" Title="数据目录与内容" Margin="0,0,0,15" Visibility="Collapsed">

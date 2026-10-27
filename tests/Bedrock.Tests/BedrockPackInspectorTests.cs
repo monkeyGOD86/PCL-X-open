@@ -436,6 +436,30 @@ public sealed class BedrockPackInspectorTests {
         } finally { Directory.Delete(fixture, true); }
     }
 
+    public void PreparesArchiveThenInstallsAndRecoversIt() {
+        string fixture = Path.Combine(Path.GetTempPath(), "pcl-bedrock-archive-transaction-test-" + Guid.NewGuid().ToString("N"));
+        string game = Path.Combine(fixture, "game"), category = Path.Combine(game, "resource_packs");
+        Directory.CreateDirectory(category);
+        try {
+            string archive = Path.Combine(fixture, "pack.mcpack");
+            using (var file = File.Create(archive))
+            using (var zip = new ZipArchive(file, ZipArchiveMode.Create)) {
+                Add(zip, "manifest.json", Manifest);
+                Add(zip, "textures/content.txt", "fixture");
+            }
+            var prepared = BedrockArchivePreparer.PrepareMcpack(archive, fixture);
+            var root = new BedrockDataRoot(game, "fixture");
+            string transaction = BedrockAddonTransaction.Prepare(root, [prepared], [root]);
+            BedrockAddonTransaction.Commit(root, transaction, [root]);
+            var installed = BedrockAddonCatalog.Read(root).Single();
+            Check(installed.Manifest?.Uuid == prepared.Preview.Pack.Uuid &&
+                File.ReadAllText(Path.Combine(installed.Path, "textures", "content.txt")) == "fixture", "archive was not installed");
+            BedrockAddonTransaction.Rollback(root, transaction);
+            Check(!Directory.Exists(installed.Path) && File.Exists(Path.Combine(transaction, "pack-0", "manifest.json")),
+                "installed archive was not recovered");
+        } finally { Directory.Delete(fixture, true); }
+    }
+
     private static void Add(ZipArchive zip, string name, string text) {
         using var writer = new StreamWriter(zip.CreateEntry(name).Open(), new UTF8Encoding(false));
         writer.Write(text);
