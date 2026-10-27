@@ -123,7 +123,9 @@ public static class BedrockAddonTransaction {
                 BedrockDataRootFinder.EnsureNoReparsePoints(parent);
                 BedrockDataRootFinder.EnsureNoReparsePoints(Stage(path, i));
                 Verify(Stage(path, i), record);
-                Directory.Move(Stage(path, i), Destination(rootPath, id, i, record));
+                string destination = Destination(rootPath, id, i, record);
+                Directory.Move(Stage(path, i), destination);
+                Verify(destination, record);
             }
         } catch (Exception ex) {
             throw new IOException("事务提交未完成；请保留事务目录并使用恢复流程：" + path, ex);
@@ -151,6 +153,7 @@ public static class BedrockAddonTransaction {
                 BedrockDataRootFinder.EnsureNoReparsePoints(path);
                 Verify(from, record);
                 Directory.Move(from, to);
+                Verify(to, record);
             }
         } catch (Exception ex) {
             throw new IOException("恢复未完成，请保留事务目录并再次检查：" + path, ex);

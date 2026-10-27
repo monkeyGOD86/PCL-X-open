@@ -78,6 +78,7 @@ public static class BedrockWorldPackEditor {
                 if (Hash(ReadBounded(displaced)) != current.Hash)
                     throw new IOException("配置在替换时发生变化；被替换文件已保留：" + displaced);
             } else File.Move(temporary, path); // Fails if another writer created the file.
+            if (Hash(ReadBounded(path)) != Hash(output)) throw new IOException("写入后的世界配置发生变化，请检查备份。");
             return new(backup, current.Exists ? displaced : null, Hash(output));
         } catch (Exception ex) {
             throw new IOException("配置修改未完成或需要检查；备份：" + backup + "，临时文件：" + temporary + "，原文件副本：" + displaced, ex);
@@ -130,6 +131,8 @@ public static class BedrockWorldPackEditor {
             else File.Move(path, displaced); // Preserve the added configuration rather than deleting it.
             if (Hash(ReadBounded(displaced)) != current.Hash)
                 throw new IOException("配置在恢复时发生变化；被替换文件已保留：" + displaced);
+            if (existed && Hash(ReadBounded(path)) != Hash(original) || !existed && File.Exists(path))
+                throw new IOException("恢复后的世界配置发生变化，请检查保留的副本。");
             return displaced;
         } catch (Exception ex) {
             throw new IOException("配置恢复未完成或需要检查；备份：" + backup + "，临时文件：" + temporary + "，恢复前副本：" + displaced, ex);

@@ -47,7 +47,9 @@ public static class BedrockAddonRemoval {
             }
             Verify(source, confirmed.Pack.Uuid, confirmed.Pack.Version, confirmed.Fingerprint);
             BedrockDataRootFinder.EnsureNoReparsePoints(transaction);
-            Directory.Move(source, Path.Combine(transaction, "content"));
+            string content = Path.Combine(transaction, "content");
+            Directory.Move(source, content);
+            Verify(content, confirmed.Pack.Uuid, confirmed.Pack.Version, confirmed.Fingerprint);
             return new(transaction, backup);
         } catch (Exception ex) when (started) {
             throw new IOException("附加包移除未完成或需要检查；外部备份：" + backup + "，事务目录：" + transaction, ex);
@@ -97,6 +99,8 @@ public static class BedrockAddonRemoval {
         BedrockDataRootFinder.EnsureNoReparsePoints(parent);
         BedrockDataRootFinder.EnsureNoReparsePoints(content);
         Directory.Move(content, destination);
+        try { Verify(destination, uuid, record.Value<string>("version")!, record.Value<string>("fingerprint")!); }
+        catch (Exception ex) { throw new IOException("恢复后的内容发生变化，请检查原位置与备份：" + destination, ex); }
         return destination;
     }
 

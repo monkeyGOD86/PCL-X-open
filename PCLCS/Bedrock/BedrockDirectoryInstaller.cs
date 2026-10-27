@@ -66,10 +66,12 @@ public static class BedrockDirectoryInstaller {
                 BedrockDataRootFinder.EnsureNoReparsePoints(stage);
                 BedrockDataRootFinder.EnsureNoReparsePoints(category);
                 Directory.Move(stage, destination); // Same-volume move; never replaces an existing directory.
+                if (!string.Equals(Fingerprint(destination), confirmed.Fingerprint, StringComparison.Ordinal))
+                    throw new IOException("移动后的附加包内容发生变化。");
                 return destination;
             } catch (Exception ex) when (stageCreated) {
                 // Preserve incomplete data rather than recursively deleting a potentially changed tree.
-                throw new IOException("附加包安装未完成，临时目录保留供检查：" + stage, ex);
+                throw new IOException("附加包安装未完成或需要检查；暂存目录：" + stage + "，目标目录：" + destination, ex);
             }
         }
     }
