@@ -33,13 +33,15 @@ public static class BedrockWorldBackup {
         BedrockDataRootFinder.EnsureNoReparsePoints(parent);
         if (File.Exists(output) || Directory.Exists(output)) throw new IOException("目标文件已经存在，请选择其他名称。");
         string temporary = output + ".partial-" + Guid.NewGuid().ToString("N");
+        bool temporaryCreated = false;
         try {
             var entries = new JArray();
             var directories = new JArray();
             long total = 0;
             int files = 0;
-            using (var file = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None))
-            using (var archive = new ZipArchive(file, ZipArchiveMode.Create)) {
+            using (var file = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None)) {
+                temporaryCreated = true;
+                using var archive = new ZipArchive(file, ZipArchiveMode.Create);
                 var pending = new Stack<(string Path, int Depth)>();
                 pending.Push((worldPath, 0));
                 while (pending.Count > 0) {
@@ -89,9 +91,9 @@ public static class BedrockWorldBackup {
             var verified = Verify(temporary);
             File.Move(temporary, output); // CreateNew semantics: no overwrite.
             return verified;
-        } catch {
-            if (File.Exists(temporary)) File.Delete(temporary);
-            throw;
+        } catch (Exception ex) when (temporaryCreated) {
+            // Do not delete a path another process might have replaced after the stream closed.
+            throw new IOException("世界备份未完成；临时文件保留供检查：" + temporary, ex);
         }
     }
 

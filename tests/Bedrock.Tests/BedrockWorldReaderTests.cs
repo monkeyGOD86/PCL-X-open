@@ -54,6 +54,25 @@ public sealed class BedrockWorldReaderTests {
         } finally { File.Delete(backup); }
     });
 
+    public void PreservesPartialBackupWhenWorldCannotBeBackedUp() {
+        string fixture = Path.Combine(Path.GetTempPath(), "pcl-b-" + Guid.NewGuid().ToString("N").Substring(0, 8));
+        string root = Path.Combine(fixture, "g"), world = Path.Combine(root, "minecraftWorlds", "w");
+        Directory.CreateDirectory(world);
+        try {
+            File.WriteAllText(Path.Combine(world, "level.dat"), "fixture");
+            string nested = world;
+            for (int i = 0; i < 66; i++) { nested = Path.Combine(nested, "d"); Directory.CreateDirectory(nested); }
+            string output = Path.Combine(fixture, "backup.zip");
+            try {
+                BedrockWorldBackup.Create(new BedrockDataRoot(root, "fixture"), new BedrockWorldInfo(world, "fixture", true, [], [], null), output);
+                throw new Exception("excessively deep world was backed up");
+            } catch (IOException ex) { Check(ex.Message.Contains("临时文件"), "failure did not report preserved partial file"); }
+            Check(!File.Exists(output) && Directory.GetFiles(fixture, "backup.zip.partial-*").Length == 1,
+                "partial backup was not preserved");
+            Check(File.ReadAllText(Path.Combine(world, "level.dat")) == "fixture", "source world changed");
+        } finally { Directory.Delete(fixture, true); }
+    }
+
     public void RejectsBackupInsideGameData() => WithWorld((_, root, world) => {
         File.WriteAllText(Path.Combine(world, "level.dat"), "fixture");
         var info = new BedrockWorldInfo(world, "Test", true, [], [], null);

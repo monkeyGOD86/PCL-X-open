@@ -23,6 +23,7 @@ public class BedrockServiceTests {
             worldTests.ReportsInvalidWorldMetadataWithoutDiscardingWorld,
             worldTests.CreatesAndVerifiesBackupWithoutChangingWorld,
             worldTests.BacksUpHighlyCompressibleWorldData,
+            worldTests.PreservesPartialBackupWhenWorldCannotBeBackedUp,
             worldTests.RejectsBackupInsideGameData,
             worldTests.RefusesToOverwriteExistingBackup,
             worldTests.RestoresAsNewWithoutOverwritingOriginal,
