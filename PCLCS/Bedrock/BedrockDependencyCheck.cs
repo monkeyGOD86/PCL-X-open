@@ -12,8 +12,12 @@ public sealed class BedrockDependencyReport(IReadOnlyList<BedrockDependencyResul
 
 /// <summary>Checks declared pack UUIDs across selected local roots; it does not resolve platform modules or activate dependencies.</summary>
 public static class BedrockDependencyCheck {
-    public static BedrockDependencyReport Analyze(BedrockPackInfo pack, IReadOnlyList<BedrockDataRoot> roots) {
+    public static BedrockDependencyReport Analyze(BedrockPackInfo pack, IReadOnlyList<BedrockDataRoot> roots) => Analyze(pack, roots, []);
+
+    public static BedrockDependencyReport Analyze(BedrockPackInfo pack, IReadOnlyList<BedrockDataRoot> roots,
+        IReadOnlyList<BedrockPackInfo> planned) {
         if (roots.Count is < 1 or > 128) throw new InvalidDataException("依赖检查目录数量无效。");
+        if (planned.Count > 128) throw new InvalidDataException("待安装的包过多。");
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var installed = new List<BedrockPackInfo>();
         var incomplete = new List<string>();
@@ -36,10 +40,13 @@ public static class BedrockDependencyCheck {
                 continue;
             }
             var matches = installed.Where(item => item.Uuid == id).ToArray();
-            if (matches.Length == 0) results.Add(new(dependency, incomplete.Count == 0 ? "所选目录未发现" : "无法确认：部分目录未读全"));
-            else if (parts.Length > 1 && !matches.Any(item => item.Version == parts[1]))
-                results.Add(new(dependency, incomplete.Count == 0 ? "未发现声明版本" : "无法确认声明版本：部分目录未读全"));
-            else results.Add(new(dependency, "已在所选目录发现；世界启用状态未检查"));
+            var pending = planned.Where(item => item.Uuid == id).ToArray();
+            bool installedMatch = matches.Any(item => parts.Length == 1 || item.Version == parts[1]);
+            bool pendingMatch = pending.Any(item => parts.Length == 1 || item.Version == parts[1]);
+            if (installedMatch) results.Add(new(dependency, "已在所选目录发现；世界启用状态未检查"));
+            else if (pendingMatch) results.Add(new(dependency, "本次待安装；世界启用状态未检查"));
+            else if (matches.Length + pending.Length == 0) results.Add(new(dependency, incomplete.Count == 0 ? "所选目录未发现" : "无法确认：部分目录未读全"));
+            else results.Add(new(dependency, incomplete.Count == 0 ? "未发现声明版本" : "无法确认声明版本：部分目录未读全"));
         }
         return new(results, incomplete);
     }

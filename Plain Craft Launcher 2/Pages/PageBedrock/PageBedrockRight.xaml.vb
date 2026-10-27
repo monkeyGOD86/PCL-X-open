@@ -532,10 +532,14 @@ Public Class PageBedrockRight
             LabPackInfo.Text = "正在准备并校验资源包…"
             Dim Packs = Await Task.Run(Function() PrepareResourcePacks(Source, IsDirectory))
             Dim Roots = Await Task.Run(Function() ValidateInstallTarget(Installation, Root))
+            LabPackInfo.Text = "正在检查资源包依赖…"
+            Dim Dependencies = Await Task.Run(Function() DescribeDependencies(Packs, Roots))
+            Dim DependencyText = If(Dependencies.Count = 0, "无声明依赖。", String.Join(vbCrLf, Dependencies.Take(12)) &
+                                    If(Dependencies.Count > 12, vbCrLf & $"另有 {Dependencies.Count - 12} 项未显示，请检查包的完整依赖。", ""))
             Dim Scope = String.Join(vbCrLf, Roots.Select(Function(Item) Item.Path))
             If MyMsgBox("请确认游戏已关闭且同步完成。此功能仅在一台设备上验证过资源包布局。" & vbCrLf & vbCrLf &
                         "目标目录：" & Root.Path & vbCrLf & "检查目录：" & vbCrLf & Scope & vbCrLf & vbCrLf &
-                        DescribePacks(Packs.Select(Function(Item) Item.Preview.Pack)) & vbCrLf &
+                        DescribePacks(Packs.Select(Function(Item) Item.Preview.Pack)) & vbCrLf & "依赖检查：" & vbCrLf & DependencyText & vbCrLf &
                         "将创建可恢复事务和新包目录，不覆盖现有包。游戏是否识别需自行确认。", "确认实验性安装", "安装", "取消") <> 1 Then
                 LabPackInfo.Text = "已取消安装；准备目录已保留：" & vbCrLf & String.Join(vbCrLf, Packs.Select(Function(Item) Item.Directory))
                 Return
@@ -574,11 +578,27 @@ Public Class PageBedrockRight
         Else
             Throw New InvalidDataException("不支持的附加包格式。")
         End If
+        If Packs.Count > 16 Then Throw New InvalidDataException("每次最多安装 16 个包；准备目录已保留：" & vbCrLf &
+                                                                  String.Join(vbCrLf, Packs.Select(Function(Item) Item.Directory)))
         If Packs.Any(Function(Item) Not Item.Preview.Pack.Modules.Contains("resources") OrElse Item.Preview.Pack.Modules.Contains("data")) Then
             Throw New InvalidDataException("当前实验性安装仅支持资源包；行为包及混合包尚未验证。准备目录已保留：" &
                                            vbCrLf & String.Join(vbCrLf, Packs.Select(Function(Item) Item.Directory)))
         End If
         Return Packs
+    End Function
+
+    Private Shared Function DescribeDependencies(Packs As IReadOnlyList(Of BedrockPreparedPack), Roots As IReadOnlyList(Of BedrockDataRoot)) As IReadOnlyList(Of String)
+        Dim Planned = Packs.Select(Function(Item) Item.Preview.Pack).ToArray()
+        Dim Lines As New List(Of String)
+        For Each Pack In Planned
+            If Pack.Dependencies.Count = 0 Then Continue For
+            Dim Report = BedrockDependencyCheck.Analyze(Pack, Roots, Planned)
+            If Report.IncompleteRoots.Count > 0 Then Lines.Add(Pack.Name & "：部分目录未完整读取。")
+            For Each Dependency In Report.Results
+                Lines.Add(Pack.Name & " → " & Dependency.Dependency & "：" & Dependency.Status)
+            Next
+        Next
+        Return Lines
     End Function
 
     Private Function ValidateInstallTarget(Installation As BedrockInstallation, Root As BedrockDataRoot) As IReadOnlyList(Of BedrockDataRoot)

@@ -418,6 +418,11 @@ public sealed class BedrockPackInspectorTests {
             var report = BedrockDependencyCheck.Analyze(source, roots);
             Check(report.Results[0].Status.Contains("世界启用状态未检查") && report.Results[1].Status.Contains("未验证"),
                 "dependency status was overstated");
+            File.Delete(Path.Combine(pack, "manifest.json")); Directory.Delete(pack);
+            var planned = new BedrockPackInfo("dependency", "", Guid.Parse("11111111-1111-4111-8111-111111111111"), "1.2.3", ["resources"], [], null);
+            report = BedrockDependencyCheck.Analyze(source, roots, [planned]);
+            Check(report.Results[0].Status.Contains("本次待安装"), "planned dependency was not distinguished from installed");
+            Directory.CreateDirectory(pack); File.WriteAllText(Path.Combine(pack, "manifest.json"), Manifest);
             var wrongVersion = new BedrockPackInfo("source", "", Guid.NewGuid(), "1.0.0", ["data"],
                 ["11111111-1111-4111-8111-111111111111 9.9.9"], null);
             Check(BedrockDependencyCheck.Analyze(wrongVersion, roots).Results.Single().Status.Contains("未发现声明版本"), "version mismatch missed");
