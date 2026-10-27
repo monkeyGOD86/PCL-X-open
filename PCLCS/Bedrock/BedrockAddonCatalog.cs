@@ -63,7 +63,7 @@ public static class BedrockAddonCatalog {
             foreach (string dependency in manifest.Dependencies) {
                 string[] parts = dependency.Split(new[] { ' ' }, 2);
                 if (!Guid.TryParse(parts[0], out Guid id)) continue; // Platform script modules need separate validation.
-                if (!byUuid.TryGetValue(id, out var candidates)) warnings.Add("缺少依赖：" + parts[0]);
+                if (!byUuid.TryGetValue(id, out var candidates)) warnings.Add("所选目录未发现依赖（其他目录可能提供）：" + parts[0]);
                 else if (parts.Length > 1 && !candidates.Any(candidate => candidate.Manifest!.Version == parts[1]))
                     warnings.Add("依赖版本不匹配：" + dependency);
             }

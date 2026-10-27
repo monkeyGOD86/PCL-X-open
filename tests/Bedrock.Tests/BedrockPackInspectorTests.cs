@@ -69,6 +69,55 @@ public sealed class BedrockPackInspectorTests {
         }
     }
 
+    public void InstallsDirectoryWithoutOverwritingAndRejectsDuplicates() {
+        string fixture = Path.Combine(Path.GetTempPath(), "pcl-bedrock-install-test-" + Guid.NewGuid().ToString("N"));
+        string source = Path.Combine(fixture, "source");
+        string rootPath = Path.Combine(fixture, "game");
+        Directory.CreateDirectory(source);
+        Directory.CreateDirectory(Path.Combine(rootPath, "resource_packs"));
+        try {
+            File.WriteAllText(Path.Combine(source, "manifest.json"), Manifest);
+            Directory.CreateDirectory(Path.Combine(source, "textures"));
+            File.WriteAllText(Path.Combine(source, "textures", "test.txt"), "original");
+            var root = new BedrockDataRoot(rootPath, "fixture");
+            var preview = BedrockPackInspector.InspectDirectory(source);
+            string installed = BedrockDirectoryInstaller.Install(root, source, preview.Uuid, preview.Version);
+            Check(File.ReadAllText(Path.Combine(installed, "textures", "test.txt")) == "original", "installed contents differ");
+            File.WriteAllText(Path.Combine(source, "textures", "test.txt"), "changed");
+            try {
+                BedrockDirectoryInstaller.Install(root, source, preview.Uuid, preview.Version);
+                throw new Exception("duplicate was accepted");
+            } catch (InvalidDataException) { }
+            Check(File.ReadAllText(Path.Combine(installed, "textures", "test.txt")) == "original", "existing package was overwritten");
+            Check(Directory.GetDirectories(Path.Combine(rootPath, "resource_packs")).Length == 1, "duplicate directory created");
+        } finally { Directory.Delete(fixture, true); }
+    }
+
+    public void RejectsChangedPreviewAndUnrecognisedInstalledPack() {
+        string fixture = Path.Combine(Path.GetTempPath(), "pcl-bedrock-install-test-" + Guid.NewGuid().ToString("N"));
+        string source = Path.Combine(fixture, "source");
+        string rootPath = Path.Combine(fixture, "game");
+        Directory.CreateDirectory(source);
+        string category = Path.Combine(rootPath, "resource_packs");
+        Directory.CreateDirectory(category);
+        try {
+            File.WriteAllText(Path.Combine(source, "manifest.json"), Manifest);
+            var root = new BedrockDataRoot(rootPath, "fixture");
+            var preview = BedrockPackInspector.InspectDirectory(source);
+            try {
+                BedrockDirectoryInstaller.Install(root, source, preview.Uuid, "9.9.9");
+                throw new Exception("changed preview was accepted");
+            } catch (InvalidDataException) { }
+            Directory.CreateDirectory(Path.Combine(category, "unknown"));
+            try {
+                BedrockDirectoryInstaller.Install(root, source, preview.Uuid, preview.Version);
+                throw new Exception("incomplete catalog was accepted");
+            } catch (InvalidDataException) { }
+            Check(Directory.GetDirectories(category).Length == 1, "unexpected package installed");
+            Check(!Directory.GetDirectories(rootPath, ".pcl-addon-stage-*").Any(), "unexpected stage created");
+        } finally { Directory.Delete(fixture, true); }
+    }
+
     private static void Add(ZipArchive zip, string name, string text) {
         using var writer = new StreamWriter(zip.CreateEntry(name).Open(), new UTF8Encoding(false));
         writer.Write(text);

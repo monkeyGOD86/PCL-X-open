@@ -156,7 +156,7 @@ public static class BedrockPackInspector {
         return ValidatePath(entry.FullName.Replace('\\', '/'));
     }
 
-    private static string ValidatePath(string path) {
+    internal static string ValidatePath(string path) {
         string name = path.Normalize(NormalizationForm.FormC);
         if (name.Length == 0 || name.Length > 1024 || name.StartsWith("/", StringComparison.Ordinal))
             throw new InvalidDataException("压缩包包含无效路径。");
