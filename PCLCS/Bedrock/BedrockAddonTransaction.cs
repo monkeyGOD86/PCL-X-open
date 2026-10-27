@@ -15,6 +15,7 @@ public sealed class BedrockAddonTransactionInfo(string path, string state, int s
 public static class BedrockAddonTransaction {
     private const string Prefix = ".pcl-addon-transaction-";
     private const string JournalName = "journal.json";
+    private const long MaxStagedBytes = 1024L * 1024 * 1024;
 
     /// <summary>Reports path-based status only; commit and rollback verify contents independently.</summary>
     public static IReadOnlyList<BedrockAddonTransactionInfo> List(BedrockDataRoot root) {
@@ -86,10 +87,11 @@ public static class BedrockAddonTransaction {
                 file.Write(bytes, 0, bytes.Length);
                 file.Flush(true);
             }
+            long copied = 0;
             for (int i = 0; i < packs.Count; i++) {
                 string stage = Stage(transaction, i);
                 Directory.CreateDirectory(stage);
-                BedrockDirectoryInstaller.CopyTree(Path.GetFullPath(packs[i].Directory).TrimEnd(Path.DirectorySeparatorChar), stage);
+                copied += BedrockDirectoryInstaller.CopyTree(Path.GetFullPath(packs[i].Directory).TrimEnd(Path.DirectorySeparatorChar), stage, MaxStagedBytes - copied);
                 Verify(stage, (JObject)records[i]);
             }
             return transaction;

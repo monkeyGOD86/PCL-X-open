@@ -82,7 +82,7 @@ public static class BedrockDirectoryInstaller {
             throw new InvalidDataException("目标目录已存在相同 UUID 的附加包；不会覆盖或安装另一版本。");
     }
 
-    internal static void CopyTree(string source, string stage) {
+    internal static long CopyTree(string source, string stage, long maxBytes = MaxTotalBytes) {
         var pending = new Stack<(string Source, string Target)>();
         pending.Push((source, stage));
         int entries = 0;
@@ -103,7 +103,7 @@ public static class BedrockDirectoryInstaller {
                 } else {
                     using var input = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
                     long length = input.Length;
-                    if (length > MaxFileBytes || length > MaxTotalBytes - total) throw new InvalidDataException("附加包超过大小限制。");
+                    if (length > MaxFileBytes || length > maxBytes - total) throw new InvalidDataException("附加包超过大小限制。");
                     using var output = new FileStream(next, FileMode.CreateNew, FileAccess.Write, FileShare.None);
                     byte[] buffer = new byte[65536];
                     long copied = 0;
@@ -118,6 +118,7 @@ public static class BedrockDirectoryInstaller {
                 }
             }
         }
+        return total;
     }
 
     // Hash paths, empty directories and file contents, so confirmation applies to the complete tree.
