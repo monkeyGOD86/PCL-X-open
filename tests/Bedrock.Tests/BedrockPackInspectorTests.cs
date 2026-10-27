@@ -291,7 +291,7 @@ public sealed class BedrockPackInspectorTests {
             Check(!Directory.Exists(pack) && File.ReadAllText(Path.Combine(removal.BackupPath, "data.txt")) == "user data", "backup or quarantine missing");
             var listed = BedrockAddonRemoval.List(root).Single();
             Check(listed.State == "已隔离" && listed.OriginalPath == pack && listed.BackupPath == removal.BackupPath, "removal not listed");
-            Check(BedrockAddonRemoval.Restore(root, removal.TransactionPath) == pack, "original location not restored");
+            Check(BedrockAddonRemoval.Restore(root, removal.TransactionPath, [root]) == pack, "original location not restored");
             Check(BedrockAddonRemoval.List(root).Single().State == "原位置存在", "restored removal state not reported");
             Check(File.ReadAllText(Path.Combine(pack, "data.txt")) == "user data" && Directory.Exists(removal.BackupPath), "restore lost data");
         } finally { Directory.Delete(fixture, true); }
@@ -305,15 +305,22 @@ public sealed class BedrockPackInspectorTests {
             File.WriteAllText(Path.Combine(pack, "manifest.json"), Manifest);
             var root = new BedrockDataRoot(game, "fixture");
             var removal = BedrockAddonRemoval.Remove(root, BedrockAddonCatalog.Read(root).Single(), BedrockDirectoryInstaller.Preview(pack), backup, [root]);
+            string other = Path.Combine(fixture, "other"), duplicate = Path.Combine(other, "resource_packs", "duplicate");
+            Directory.CreateDirectory(duplicate);
+            File.WriteAllText(Path.Combine(duplicate, "manifest.json"), Manifest);
+            try { BedrockAddonRemoval.Restore(root, removal.TransactionPath, [root, new BedrockDataRoot(other, "other")]); throw new Exception("cross-root duplicate accepted"); }
+            catch (InvalidDataException) { }
+            Check(Directory.Exists(Path.Combine(removal.TransactionPath, "content")), "cross-root conflict moved quarantine");
+            File.Delete(Path.Combine(duplicate, "manifest.json")); Directory.Delete(duplicate);
             Directory.CreateDirectory(pack);
             File.WriteAllText(Path.Combine(pack, "existing.txt"), "keep");
-            try { BedrockAddonRemoval.Restore(root, removal.TransactionPath); throw new Exception("existing destination accepted"); }
+            try { BedrockAddonRemoval.Restore(root, removal.TransactionPath, [root]); throw new Exception("existing destination accepted"); }
             catch (IOException) { }
             Check(File.ReadAllText(Path.Combine(pack, "existing.txt")) == "keep", "existing destination changed");
             File.Delete(Path.Combine(pack, "existing.txt")); Directory.Delete(pack);
             string content = Path.Combine(removal.TransactionPath, "content");
             File.WriteAllText(Path.Combine(content, "extra.txt"), "modified");
-            try { BedrockAddonRemoval.Restore(root, removal.TransactionPath); throw new Exception("changed quarantine accepted"); }
+            try { BedrockAddonRemoval.Restore(root, removal.TransactionPath, [root]); throw new Exception("changed quarantine accepted"); }
             catch (InvalidDataException) { }
             Check(File.Exists(Path.Combine(content, "extra.txt")) && Directory.Exists(removal.BackupPath), "changed or backup data lost");
         } finally { Directory.Delete(fixture, true); }
@@ -336,7 +343,7 @@ public sealed class BedrockPackInspectorTests {
             string journal = Path.Combine(removal.TransactionPath, "journal.json");
             File.WriteAllText(journal, File.ReadAllText(journal).Replace("resource_packs/package", "../outside"));
             Check(BedrockAddonRemoval.List(root).Single().State == "记录不可读取", "tampered removal was not reported");
-            try { BedrockAddonRemoval.Restore(root, removal.TransactionPath); throw new Exception("tampered journal accepted"); }
+            try { BedrockAddonRemoval.Restore(root, removal.TransactionPath, [root]); throw new Exception("tampered journal accepted"); }
             catch (InvalidDataException) { }
             Check(Directory.Exists(Path.Combine(removal.TransactionPath, "content")) && Directory.Exists(removal.BackupPath), "tampered journal lost data");
         } finally { Directory.Delete(fixture, true); }

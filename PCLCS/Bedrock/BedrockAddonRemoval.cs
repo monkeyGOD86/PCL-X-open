@@ -99,9 +99,13 @@ public static class BedrockAddonRemoval {
         if (usage.References.Count > 0) throw new InvalidDataException("所选范围中的世界仍引用此附加包，请先检查世界配置。");
     }
 
-    public static string Restore(BedrockDataRoot root, string transaction) {
+    public static string Restore(BedrockDataRoot root, string transaction, IReadOnlyList<BedrockDataRoot> scope) {
         string rootPath = NormalizeRoot(root);
-        using var rootLock = BedrockRootLock.Acquire(rootPath);
+        if (scope.Count is < 1 or > 128) throw new InvalidDataException("必须确认附加包冲突检查范围。");
+        string[] paths = scope.Select(NormalizeRoot).ToArray();
+        if (paths.Distinct(StringComparer.OrdinalIgnoreCase).Count() != paths.Length || !paths.Contains(rootPath, StringComparer.OrdinalIgnoreCase))
+            throw new InvalidDataException("检查范围必须包含所选目录且不能重复。");
+        using var rootLock = BedrockRootLock.AcquireAll(paths);
         var (stage, destination, uuid, record) = ReadJournal(rootPath, transaction);
         string relative = record.Value<string>("relativePath")!;
         if (File.Exists(destination) || Directory.Exists(destination)) throw new IOException("原位置已被占用，不能覆盖。");
@@ -109,15 +113,18 @@ public static class BedrockAddonRemoval {
         BedrockDataRootFinder.EnsureNoReparsePoints(parent);
         string content = Path.Combine(stage, "content");
         Verify(content, uuid, record.Value<string>("version")!, record.Value<string>("fingerprint")!);
-        var catalog = BedrockAddonCatalog.Read(root);
-        if (catalog.Any(item => item.Manifest is not null && item.Manifest.Uuid == uuid))
-            throw new InvalidDataException("目标中已存在相同 UUID 的包，不能自动恢复。");
         // An emptied version-container is expected to be unrecognized after its only child is moved.
         bool emptyVersionContainer = relative.Split('/').Length == 3 && !File.Exists(Path.Combine(parent, "manifest.json")) &&
             !Directory.EnumerateDirectories(parent).Any();
-        if (catalog.Any(item => item.Manifest is null && !(emptyVersionContainer &&
-                string.Equals(Path.GetFullPath(item.Path), parent, StringComparison.OrdinalIgnoreCase))))
-            throw new InvalidDataException("现有包无法全部识别，无法检查冲突。");
+        foreach (var scopeRoot in scope) {
+            var catalog = BedrockAddonCatalog.Read(scopeRoot);
+            if (catalog.Any(item => item.Manifest is not null && item.Manifest.Uuid == uuid))
+                throw new InvalidDataException("检查范围中已存在相同 UUID 的包，不能自动恢复。");
+            bool targetRoot = string.Equals(NormalizeRoot(scopeRoot), rootPath, StringComparison.OrdinalIgnoreCase);
+            if (catalog.Any(item => item.Manifest is null && !(targetRoot && emptyVersionContainer &&
+                    string.Equals(Path.GetFullPath(item.Path), parent, StringComparison.OrdinalIgnoreCase))))
+                throw new InvalidDataException("现有包无法全部识别，无法检查冲突。");
+        }
         BedrockDataRootFinder.EnsureNoReparsePoints(parent);
         BedrockDataRootFinder.EnsureNoReparsePoints(content);
         Directory.Move(content, destination);

@@ -155,20 +155,29 @@ Public Class PageBedrockRight
     Private Async Sub RestoreRemovalClicked(sender As Object, e As EventArgs) Handles BtnRestoreRemoval.Click
         Dim Root = TryCast(TryCast(ComboRoots.SelectedItem, MyComboBoxItem)?.Tag, BedrockDataRoot)
         Dim Removal = TryCast(TryCast(ComboRemovals.SelectedItem, MyComboBoxItem)?.Tag, BedrockRemovalInfo)
-        If IsBusy OrElse Root Is Nothing OrElse Removal Is Nothing OrElse Removal.State <> "已隔离" Then Return
+        Dim Installation = TryCast(TryCast(ComboInstall.SelectedItem, MyComboBoxItem)?.Tag, BedrockInstallation)
+        If IsBusy OrElse Root Is Nothing OrElse Installation Is Nothing OrElse Removal Is Nothing OrElse Removal.State <> "已隔离" Then Return
         If IsKnownBedrockProcessRunning() Then
             MyMsgBox("请先关闭 Minecraft 基岩版并等待同步完成。", "恢复附加包")
             Return
         End If
-        If MyMsgBox("请确认游戏已关闭且同步完成。" & vbCrLf & vbCrLf & "数据目录：" & Root.Path & vbCrLf &
-                    "恢复到：" & Removal.OriginalPath & vbCrLf & "事务：" & Removal.Path & vbCrLf &
-                    "恢复前会校验内容及冲突，不覆盖已有文件。外部备份会保留。", "确认恢复附加包", "恢复", "取消") <> 1 Then Return
         SetBusy(True)
-        LabRemovalStatus.Text = "正在校验并恢复附加包…"
         Try
+            LabRemovalStatus.Text = "正在检查目标和数据目录…"
+            Dim Roots = Await Task.Run(Function() ValidateInstallTarget(Installation, Root))
+            If MyMsgBox("请确认游戏已关闭且同步完成。" & vbCrLf & vbCrLf & "数据目录：" & Root.Path & vbCrLf &
+                        "恢复到：" & Removal.OriginalPath & vbCrLf & "事务：" & Removal.Path & vbCrLf &
+                        "检查目录：" & vbCrLf & String.Join(vbCrLf, Roots.Select(Function(Item) Item.Path)) & vbCrLf &
+                        "恢复前会校验内容和这些目录内的冲突，不覆盖已有文件；外部备份会保留。", "确认恢复附加包", "恢复", "取消") <> 1 Then
+                LabRemovalStatus.Text = "已取消恢复。"
+                Return
+            End If
+            LabRemovalStatus.Text = "正在校验并恢复附加包…"
             Dim Restored = Await Task.Run(Function()
                                               If IsKnownBedrockProcessRunning() Then Throw New InvalidOperationException("Minecraft 正在运行，请关闭后重试。")
-                                              Return BedrockAddonRemoval.Restore(Root, Removal.Path)
+                                              Dim CurrentRoots = ValidateInstallTarget(Installation, Root)
+                                              If Not SameRoots(Roots, CurrentRoots) Then Throw New InvalidOperationException("数据目录范围已变化，请重新确认。")
+                                              Return BedrockAddonRemoval.Restore(Root, Removal.Path, CurrentRoots)
                                           End Function)
             ComboRemovals.Items.Clear()
             LabRemovalStatus.Text = "已恢复到原位置；请在游戏中确认。" & vbCrLf & Restored
