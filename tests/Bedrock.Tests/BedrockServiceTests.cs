@@ -30,7 +30,9 @@ public class BedrockServiceTests {
             packTests.InstallsDirectoryWithoutOverwritingAndRejectsDuplicates,
             packTests.RejectsChangedPreviewAndUnrecognisedInstalledPack,
             packTests.PreparesArchiveAndDetectsLaterChanges,
-            packTests.RejectsArchiveOutsidePackDirectory];
+            packTests.RejectsArchiveOutsidePackDirectory,
+            packTests.PreparesMultiPackAddonWithoutInstalling,
+            packTests.RejectsAddonWithAmbiguousFiles];
         int failures = 0;
         foreach (var test in cases) {
             try { test(); Console.WriteLine($"PASS {test.Method.Name}"); }

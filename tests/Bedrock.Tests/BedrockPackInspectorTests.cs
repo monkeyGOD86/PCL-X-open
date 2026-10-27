@@ -161,6 +161,48 @@ public sealed class BedrockPackInspectorTests {
         } finally { Directory.Delete(fixture, true); }
     }
 
+    public void PreparesMultiPackAddonWithoutInstalling() {
+        string fixture = Path.Combine(Path.GetTempPath(), "pcl-bedrock-addon-test-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(fixture);
+        try {
+            using var nestedBytes = new MemoryStream();
+            using (var nested = new ZipArchive(nestedBytes, ZipArchiveMode.Create, true))
+                Add(nested, "manifest.json", Manifest.Replace("11111111-1111-4111-8111-111111111111", "33333333-3333-4333-8333-333333333333"));
+            string path = Path.Combine(fixture, "test.mcaddon");
+            using (var file = File.Create(path))
+            using (var zip = new ZipArchive(file, ZipArchiveMode.Create)) {
+                Add(zip, "first/manifest.json", Manifest);
+                Add(zip, "first/textures/a.txt", "first");
+                using var stream = zip.CreateEntry("other/second.mcpack").Open();
+                byte[] bytes = nestedBytes.ToArray();
+                stream.Write(bytes, 0, bytes.Length);
+            }
+            var addon = BedrockArchivePreparer.PrepareMcaddon(path, fixture);
+            Check(addon.Packs.Count == 2 && addon.Packs.Select(p => p.Preview.Pack.Uuid).Distinct().Count() == 2,
+                "multiple package members missing");
+            Check(addon.Packs.Any(p => File.Exists(Path.Combine(p.Directory, "textures", "a.txt"))), "folder member content missing");
+            Check(!Directory.Exists(Path.Combine(fixture, "resource_packs")), "preparation modified game data");
+        } finally { Directory.Delete(fixture, true); }
+    }
+
+    public void RejectsAddonWithAmbiguousFiles() {
+        string fixture = Path.Combine(Path.GetTempPath(), "pcl-bedrock-addon-test-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(fixture);
+        try {
+            string path = Path.Combine(fixture, "test.mcaddon");
+            using (var file = File.Create(path))
+            using (var zip = new ZipArchive(file, ZipArchiveMode.Create)) {
+                Add(zip, "first/manifest.json", Manifest);
+                Add(zip, "unrelated.txt", "unrelated");
+            }
+            try {
+                BedrockArchivePreparer.PrepareMcaddon(path, fixture);
+                throw new Exception("ambiguous addon accepted");
+            } catch (InvalidDataException) { }
+            Check(!Directory.GetDirectories(fixture, "pcl-addon-preparation-*").Any(), "invalid addon produced a stage");
+        } finally { Directory.Delete(fixture, true); }
+    }
+
     private static void Add(ZipArchive zip, string name, string text) {
         using var writer = new StreamWriter(zip.CreateEntry(name).Open(), new UTF8Encoding(false));
         writer.Write(text);
