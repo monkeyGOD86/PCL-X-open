@@ -7,6 +7,15 @@ Public Class PageBedrockRight
     Private SelectedPackPath As String
     Private SelectedPackIsDirectory As Boolean
 
+    Private Class WorldAddonChoice
+        Public ReadOnly Root As BedrockDataRoot
+        Public ReadOnly Addon As BedrockInstalledAddon
+        Public Sub New(Root As BedrockDataRoot, Addon As BedrockInstalledAddon)
+            Me.Root = Root
+            Me.Addon = Addon
+        End Sub
+    End Class
+
     Private Async Sub PageLoaded(sender As Object, e As RoutedEventArgs) Handles Me.Loaded
         If HasLoaded Then Return
         HasLoaded = True
@@ -75,11 +84,13 @@ Public Class PageBedrockRight
         Dim ScrollOperation = Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Loaded, New Action(Sub() PanBack.ScrollToBottom()))
         ComboRoots.Items.Clear()
         ComboWorlds.Items.Clear()
+        ComboWorldAddons.Items.Clear()
         ComboAddons.Items.Clear()
         ComboTransactions.Items.Clear()
         ComboRemovals.Items.Clear()
         LabWorldStatus.Text = ""
         LabWorldDetails.Text = ""
+        LabWorldAddonStatus.Text = ""
         LabAddonStatus.Text = ""
         LabAddonDetails.Text = ""
         LabTransactionStatus.Text = ""
@@ -111,11 +122,13 @@ Public Class PageBedrockRight
         BtnListTransactions.IsEnabled = Not IsBusy AndAlso Root IsNot Nothing
         BtnListRemovals.IsEnabled = Not IsBusy AndAlso Root IsNot Nothing
         ComboWorlds.Items.Clear()
+        ComboWorldAddons.Items.Clear()
         ComboAddons.Items.Clear()
         ComboTransactions.Items.Clear()
         ComboRemovals.Items.Clear()
         LabWorldStatus.Text = If(Root IsNot Nothing AndAlso Not Root.SupportsWorlds, "共享内容目录不用于管理账户世界。", "")
         LabWorldDetails.Text = ""
+        LabWorldAddonStatus.Text = ""
         LabAddonStatus.Text = ""
         LabAddonDetails.Text = ""
         LabTransactionStatus.Text = ""
@@ -426,6 +439,9 @@ Public Class PageBedrockRight
         Dim Item = TryCast(ComboWorlds.SelectedItem, MyComboBoxItem)
         Dim World = TryCast(Item?.Tag, BedrockWorldInfo)
         BtnBackup.IsEnabled = Not IsBusy AndAlso World IsNot Nothing AndAlso World.HasLevelData
+        If ComboWorldAddons IsNot Nothing Then ComboWorldAddons.Items.Clear()
+        If LabWorldAddonStatus IsNot Nothing Then LabWorldAddonStatus.Text = ""
+        RefreshWorldAddonButtons()
         If World Is Nothing Then
             LabWorldDetails.Text = ""
             Return
@@ -438,6 +454,215 @@ Public Class PageBedrockRight
         Dim BehaviorLines = If(World.BehaviorPacks.Count = 0, "无", String.Join(vbCrLf, World.BehaviorPacks))
         LabWorldDetails.Text = $"资源包：{ResourceLines}" & vbCrLf & $"行为包：{BehaviorLines}" & vbCrLf &
                                If(World.HasLevelData, "", "未发现 level.dat。" & vbCrLf) & If(World.Warning, "")
+    End Sub
+
+    Private Async Sub ReadWorldAddonsClicked(sender As Object, e As EventArgs) Handles BtnReadWorldAddons.Click
+        Dim Installation = TryCast(TryCast(ComboInstall.SelectedItem, MyComboBoxItem)?.Tag, BedrockInstallation)
+        Dim Root = TryCast(TryCast(ComboRoots.SelectedItem, MyComboBoxItem)?.Tag, BedrockDataRoot)
+        Dim World = TryCast(TryCast(ComboWorlds.SelectedItem, MyComboBoxItem)?.Tag, BedrockWorldInfo)
+        If IsBusy OrElse Not IsEligibleWorldTarget(Installation, Root, World) Then Return
+        ComboWorldAddons.Items.Clear()
+        LabWorldAddonStatus.Text = "正在读取候选目录中的附加包…"
+        SetBusy(True)
+        Try
+            Dim Choices = Await Task.Run(Function()
+                                             Dim Roots = ValidateInstallTarget(Installation, Root)
+                                             Return CollectWorldAddons(Roots)
+                                         End Function)
+            For Each Choice In Choices
+                Dim Pack = Choice.Addon.Manifest
+                ComboWorldAddons.Items.Add(New MyComboBoxItem With {.Content = Choice.Root.Source & " · " & Pack.Name & " · " & Pack.Version, .Tag = Choice})
+            Next
+            LabWorldAddonStatus.Text = If(Choices.Count = 0, "候选目录中没有可识别的附加包。", $"发现 {Choices.Count} 个候选包；请选择后检查其使用范围。")
+        Catch ex As Exception
+            LabWorldAddonStatus.Text = "读取候选附加包失败：" & ex.Message
+            Logger.Warn(ex, "读取世界附加包候选失败")
+        Finally
+            SetBusy(False)
+        End Try
+    End Sub
+
+    Private Shared Function CollectWorldAddons(Roots As IReadOnlyList(Of BedrockDataRoot)) As IReadOnlyList(Of WorldAddonChoice)
+        Dim Choices As New List(Of WorldAddonChoice)
+        For Each Root In Roots
+            Dim Addons = BedrockAddonCatalog.Read(Root)
+            If Addons.Any(Function(Item) Item.Manifest Is Nothing) Then Throw New InvalidDataException("部分附加包无法识别，不能完整检查冲突。")
+            For Each Addon In Addons
+                Dim Pack = Addon.Manifest
+                Dim Resource = Pack.Modules.Contains("resources")
+                Dim Behavior = Pack.Modules.Contains("data")
+                If Resource = Behavior Then Continue For
+                If Choices.Count >= 4096 Then Throw New InvalidDataException("候选附加包过多。")
+                Choices.Add(New WorldAddonChoice(Root, Addon))
+            Next
+        Next
+        Return Choices
+    End Function
+
+    Private Sub WorldAddonSelectionChanged(sender As Object, e As SelectionChangedEventArgs) Handles ComboWorldAddons.SelectionChanged
+        Dim Choice = TryCast(TryCast(ComboWorldAddons.SelectedItem, MyComboBoxItem)?.Tag, WorldAddonChoice)
+        If Choice IsNot Nothing Then
+            Dim Pack = Choice.Addon.Manifest
+            LabWorldAddonStatus.Text = $"{Pack.Name}　{Pack.Version}" & vbCrLf & $"UUID：{Pack.Uuid}　类型：{String.Join(", ", Pack.Modules)}" & vbCrLf &
+                                       If(Pack.Modules.Contains("resources"), "资源包使用范围：" & Pack.PackScope & vbCrLf, "") &
+                                       "包目录：" & Choice.Addon.Path
+        End If
+        RefreshWorldAddonButtons()
+    End Sub
+
+    Private Async Sub WorldEnableAddonClicked(sender As Object, e As EventArgs) Handles BtnWorldEnableAddon.Click
+        Await ChangeWorldAddon(True)
+    End Sub
+
+    Private Async Sub WorldDisableAddonClicked(sender As Object, e As EventArgs) Handles BtnWorldDisableAddon.Click
+        Await ChangeWorldAddon(False)
+    End Sub
+
+    Private Async Function ChangeWorldAddon(Enable As Boolean) As Task
+        Dim Installation = TryCast(TryCast(ComboInstall.SelectedItem, MyComboBoxItem)?.Tag, BedrockInstallation)
+        Dim Root = TryCast(TryCast(ComboRoots.SelectedItem, MyComboBoxItem)?.Tag, BedrockDataRoot)
+        Dim World = TryCast(TryCast(ComboWorlds.SelectedItem, MyComboBoxItem)?.Tag, BedrockWorldInfo)
+        Dim Choice = TryCast(TryCast(ComboWorldAddons.SelectedItem, MyComboBoxItem)?.Tag, WorldAddonChoice)
+        If IsBusy OrElse Not IsEligibleWorldTarget(Installation, Root, World) OrElse Choice Is Nothing Then Return
+        If IsKnownBedrockProcessRunning() Then
+            MyMsgBox("请先关闭 Minecraft 基岩版并等待同步完成。", "世界附加包配置")
+            Return
+        End If
+        SetBusy(True)
+        Dim FullBackup As String = Nothing
+        Try
+            LabWorldAddonStatus.Text = "正在检查世界、附加包和依赖…"
+            Dim Roots = Await Task.Run(Function() ValidateInstallTarget(Installation, Root))
+            Dim Preview = Await Task.Run(Function() ValidateWorldAddon(Choice, Roots))
+            Dim Kind = If(Preview.Pack.Modules.Contains("resources"), "resource", "behavior")
+            If Enable AndAlso Kind = "resource" AndAlso Preview.Pack.PackScope <> "any" AndAlso Preview.Pack.PackScope <> "world" Then
+                Throw New InvalidOperationException("此资源包不能确认可用于世界。")
+            End If
+            Dim Snapshot = Await Task.Run(Function() BedrockWorldPackEditor.Read(Root, World, Kind))
+            Dim Report = Await Task.Run(Function() BedrockDependencyCheck.Analyze(Preview.Pack, Roots))
+            Dim DependencyLines = Report.Results.Select(Function(Item) Item.Dependency & "：" & Item.Status).ToArray()
+            Dim DependencyText = If(DependencyLines.Length = 0, "无声明依赖。", String.Join(vbCrLf, DependencyLines.Take(12)) &
+                                    If(DependencyLines.Length > 12, vbCrLf & $"另有 {DependencyLines.Length - 12} 项未显示。", ""))
+            If Report.IncompleteRoots.Count > 0 Then DependencyText &= vbCrLf & "部分候选目录无法完整读取。"
+            Using Dialog As New System.Windows.Forms.FolderBrowserDialog With {.Description = "选择游戏数据目录之外的世界及配置备份文件夹", .ShowNewFolderButton = True}
+                If Dialog.ShowDialog() <> System.Windows.Forms.DialogResult.OK Then
+                    LabWorldAddonStatus.Text = "已取消修改。"
+                    Return
+                End If
+                Dim BackupParent = Path.GetFullPath(Dialog.SelectedPath).TrimEnd(Path.DirectorySeparatorChar)
+                If Roots.Any(Function(Item) IsWithinRoot(Item.Path, BackupParent)) Then Throw New InvalidOperationException("备份不能位于候选游戏数据目录内。")
+                If MyMsgBox("请确认游戏已关闭且同步完成。此功能尚未验证真实游戏对配置修改的处理。" & vbCrLf & vbCrLf &
+                            "世界：" & World.Name & vbCrLf & "世界目录：" & World.Path & vbCrLf & "账户目录：" & Root.Path & vbCrLf &
+                            "附加包：" & Preview.Pack.Name & "　" & Preview.Pack.Version & vbCrLf & "UUID：" & Preview.Pack.Uuid.ToString() & vbCrLf &
+                            "操作：" & If(Enable, "启用", "停用") & vbCrLf & "备份目录：" & BackupParent & vbCrLf &
+                            "依赖检查（不代表世界已启用依赖）：" & vbCrLf & DependencyText & vbCrLf &
+                            "将先创建并校验完整世界备份，再备份和修改配置；游戏及云同步可能仍影响结果。", "确认实验性世界配置", "继续", "取消") <> 1 Then
+                    LabWorldAddonStatus.Text = "已取消修改。"
+                    Return
+                End If
+                FullBackup = Path.Combine(BackupParent, "PCL-WorldBeforePack-" & Guid.NewGuid().ToString("N") & ".zip")
+                LabWorldAddonStatus.Text = "正在备份并校验整个世界…"
+                Await Task.Run(Sub()
+                                   If IsKnownBedrockProcessRunning() Then Throw New InvalidOperationException("Minecraft 正在运行，请关闭后重试。")
+                                   BedrockWorldBackup.Create(Root, World, FullBackup)
+                               End Sub)
+                LabWorldAddonStatus.Text = "世界备份已创建，正在再次检查并修改配置…"
+                Dim Change = Await Task.Run(Function()
+                                                If IsKnownBedrockProcessRunning() Then Throw New InvalidOperationException("Minecraft 正在运行，请关闭后重试。")
+                                                Dim CurrentRoots = ValidateInstallTarget(Installation, Root)
+                                                If Not SameRoots(Roots, CurrentRoots) Then Throw New InvalidOperationException("数据目录范围已变化，请重新确认。")
+                                                Dim CurrentPack = ValidateWorldAddon(Choice, CurrentRoots)
+                                                If CurrentPack.Fingerprint <> Preview.Fingerprint Then Throw New InvalidOperationException("附加包内容已变化，请重新确认。")
+                                                Return BedrockWorldPackEditor.SetEnabled(Root, World, Snapshot, CurrentPack.Pack, Enable, BackupParent)
+                                            End Function)
+                LabWorldAddonStatus.Text = If(Change.BackupPath Is Nothing, "配置没有变化。", "配置已写入；游戏是否识别需自行确认。") &
+                                           vbCrLf & "世界备份：" & FullBackup & If(Change.BackupPath Is Nothing, "", vbCrLf & "配置备份：" & Change.BackupPath) &
+                                           If(Change.DisplacedPath Is Nothing, "", vbCrLf & "原配置副本：" & Change.DisplacedPath) & vbCrLf & "请重新读取世界列表。"
+            End Using
+        Catch ex As Exception
+            LabWorldAddonStatus.Text = "世界配置操作未完成：" & ex.Message & If(FullBackup Is Nothing, "", vbCrLf & "世界备份路径：" & FullBackup)
+            Logger.Warn(ex, "实验性世界附加包配置失败")
+        Finally
+            SetBusy(False)
+        End Try
+    End Function
+
+    Private Shared Function ValidateWorldAddon(Choice As WorldAddonChoice, Roots As IReadOnlyList(Of BedrockDataRoot)) As BedrockDirectoryPreview
+        Dim Pack = Choice.Addon.Manifest
+        Dim Result = BedrockAddonScope.Check(Roots, {Pack.Uuid})
+        If Not Result.Complete OrElse Result.Conflicts.Count <> 1 OrElse
+           Not String.Equals(Result.Conflicts(0).Addon.Path, Choice.Addon.Path, StringComparison.OrdinalIgnoreCase) Then
+            Throw New InvalidOperationException("附加包冲突或候选目录无法完整检查，请重新读取。")
+        End If
+        Dim Preview = BedrockDirectoryInstaller.Preview(Choice.Addon.Path)
+        If Preview.Pack.Uuid <> Pack.Uuid OrElse Preview.Pack.Version <> Pack.Version Then Throw New InvalidOperationException("附加包已变化，请重新读取。")
+        Return Preview
+    End Function
+
+    Private Async Sub RestoreWorldConfigClicked(sender As Object, e As EventArgs) Handles BtnRestoreWorldConfig.Click
+        Dim Installation = TryCast(TryCast(ComboInstall.SelectedItem, MyComboBoxItem)?.Tag, BedrockInstallation)
+        Dim Root = TryCast(TryCast(ComboRoots.SelectedItem, MyComboBoxItem)?.Tag, BedrockDataRoot)
+        Dim World = TryCast(TryCast(ComboWorlds.SelectedItem, MyComboBoxItem)?.Tag, BedrockWorldInfo)
+        If IsBusy OrElse Not IsEligibleWorldTarget(Installation, Root, World) Then Return
+        If IsKnownBedrockProcessRunning() Then
+            MyMsgBox("请先关闭 Minecraft 基岩版并等待同步完成。", "恢复世界配置")
+            Return
+        End If
+        Dim Dialog As New Microsoft.Win32.OpenFileDialog With {.Filter = "PCL 配置备份 (*.json)|*.json", .CheckFileExists = True, .Multiselect = False}
+        If Dialog.ShowDialog() <> True Then Return
+        Dim Backup = Dialog.FileName
+        Dim FullBackup As String = Nothing
+        SetBusy(True)
+        Try
+            Dim Roots = Await Task.Run(Function() ValidateInstallTarget(Installation, Root))
+            If Roots.Any(Function(Item) IsWithinRoot(Item.Path, Backup)) Then Throw New InvalidOperationException("请选择候选游戏数据目录之外的配置备份。")
+            FullBackup = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(Backup)), "PCL-WorldBeforeConfigRestore-" & Guid.NewGuid().ToString("N") & ".zip")
+            If MyMsgBox("请确认游戏已关闭且同步完成。" & vbCrLf & "世界：" & World.Name & vbCrLf & "世界目录：" & World.Path & vbCrLf &
+                        "配置备份：" & Backup & vbCrLf & "恢复前世界备份：" & FullBackup & vbCrLf &
+                        "先备份整个世界；仅当当前配置与备份记录的修改结果一致时才恢复，恢复前的配置会保留。", "确认恢复世界配置", "恢复", "取消") <> 1 Then
+                LabWorldAddonStatus.Text = "已取消恢复。"
+                Return
+            End If
+            LabWorldAddonStatus.Text = "正在备份并校验整个世界…"
+            Await Task.Run(Sub()
+                               If IsKnownBedrockProcessRunning() Then Throw New InvalidOperationException("Minecraft 正在运行，请关闭后重试。")
+                               BedrockWorldBackup.Create(Root, World, FullBackup)
+                           End Sub)
+            LabWorldAddonStatus.Text = "世界备份已创建，正在校验并恢复配置…"
+            Dim Preserved = Await Task.Run(Function()
+                                               If IsKnownBedrockProcessRunning() Then Throw New InvalidOperationException("Minecraft 正在运行，请关闭后重试。")
+                                               Dim CurrentRoots = ValidateInstallTarget(Installation, Root)
+                                               If Not SameRoots(Roots, CurrentRoots) Then Throw New InvalidOperationException("数据目录范围已变化，请重新确认。")
+                                               Return BedrockWorldPackEditor.Restore(Root, World, Backup)
+                                           End Function)
+            LabWorldAddonStatus.Text = "配置已恢复；游戏是否识别需自行确认。" & vbCrLf & "世界备份：" & FullBackup & vbCrLf &
+                                       "恢复前副本：" & Preserved & vbCrLf & "请重新读取世界列表。"
+        Catch ex As Exception
+            LabWorldAddonStatus.Text = "恢复未完成：" & ex.Message & If(FullBackup Is Nothing, "", vbCrLf & "世界备份路径：" & FullBackup)
+            Logger.Warn(ex, "恢复世界附加包配置失败")
+        Finally
+            SetBusy(False)
+        End Try
+    End Sub
+
+    Private Shared Function IsEligibleWorldTarget(Installation As BedrockInstallation, Root As BedrockDataRoot, World As BedrockWorldInfo) As Boolean
+        Return Installation IsNot Nothing AndAlso Root IsNot Nothing AndAlso World IsNot Nothing AndAlso World.HasLevelData AndAlso World.Warning Is Nothing AndAlso
+               Installation.FamilyName = "Microsoft.MinecraftUWP_8wekyb3d8bbwe" AndAlso Installation.Version = "1.26.5203.0" AndAlso Installation.Architecture = "x64" AndAlso
+               Installation.AppUserModelId = "Microsoft.MinecraftUWP_8wekyb3d8bbwe!Game" AndAlso Root.SupportsWorlds AndAlso Root.Source = "GDK 用户目录候选"
+    End Function
+
+    Private Sub RefreshWorldAddonButtons()
+        If BtnReadWorldAddons Is Nothing OrElse ComboWorldAddons Is Nothing OrElse ComboInstall Is Nothing OrElse ComboRoots Is Nothing OrElse ComboWorlds Is Nothing Then Return
+        Dim Installation = TryCast(TryCast(ComboInstall.SelectedItem, MyComboBoxItem)?.Tag, BedrockInstallation)
+        Dim Root = TryCast(TryCast(ComboRoots.SelectedItem, MyComboBoxItem)?.Tag, BedrockDataRoot)
+        Dim World = TryCast(TryCast(ComboWorlds.SelectedItem, MyComboBoxItem)?.Tag, BedrockWorldInfo)
+        Dim Choice = TryCast(TryCast(ComboWorldAddons.SelectedItem, MyComboBoxItem)?.Tag, WorldAddonChoice)
+        Dim Eligible = Not IsBusy AndAlso IsEligibleWorldTarget(Installation, Root, World)
+        BtnReadWorldAddons.IsEnabled = Eligible
+        BtnRestoreWorldConfig.IsEnabled = Eligible
+        ComboWorldAddons.IsEnabled = Eligible AndAlso ComboWorldAddons.Items.Count > 0
+        BtnWorldEnableAddon.IsEnabled = Eligible AndAlso Choice IsNot Nothing
+        BtnWorldDisableAddon.IsEnabled = Eligible AndAlso Choice IsNot Nothing
     End Sub
 
     Private Async Sub BackupClicked(sender As Object, e As EventArgs) Handles BtnBackup.Click
@@ -769,5 +994,6 @@ Public Class PageBedrockRight
         Dim World = TryCast(WorldItem?.Tag, BedrockWorldInfo)
         BtnBackup.IsEnabled = Not Value AndAlso World IsNot Nothing AndAlso World.HasLevelData
         RefreshInstallPackButton()
+        RefreshWorldAddonButtons()
     End Sub
 End Class

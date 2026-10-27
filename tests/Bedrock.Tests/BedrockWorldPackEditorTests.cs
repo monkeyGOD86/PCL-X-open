@@ -89,6 +89,21 @@ public sealed class BedrockWorldPackEditorTests {
         Check(File.ReadAllText(config) == "[]" && !Directory.EnumerateFiles(backup).Any(), "restricted scope changed world data");
     });
 
+    public void BacksUpWorldBeforeConfigChangeAndRestoresBoth() => WithFixture((root, world, backup) => {
+        string config = Path.Combine(world.Path, "world_resource_packs.json");
+        string original = "[]";
+        File.WriteAllText(config, original);
+        string worldBackup = Path.Combine(backup, "world.zip");
+        BedrockWorldBackup.Create(root, world, worldBackup);
+        var snapshot = BedrockWorldPackEditor.Read(root, world, "resource");
+        var change = BedrockWorldPackEditor.SetEnabled(root, world, snapshot, Pack, true, backup);
+        Check(File.ReadAllText(config).Contains(Pack.Uuid.ToString()), "config did not change");
+        string restoredWorld = BedrockWorldBackup.RestoreAsNew(root, worldBackup);
+        Check(File.ReadAllText(Path.Combine(restoredWorld, "world_resource_packs.json")) == original, "full world backup lost original config");
+        BedrockWorldPackEditor.Restore(root, world, change.BackupPath!);
+        Check(File.ReadAllText(config) == original, "config backup did not restore original config");
+    });
+
     private static void WithFixture(Action<BedrockDataRoot, BedrockWorldInfo, string> run) {
         string fixture = Path.Combine(Path.GetTempPath(), "pcl-world-config-test-" + Guid.NewGuid().ToString("N"));
         string root = Path.Combine(fixture, "game"), world = Path.Combine(root, "minecraftWorlds", "test"), backup = Path.Combine(fixture, "backups");
