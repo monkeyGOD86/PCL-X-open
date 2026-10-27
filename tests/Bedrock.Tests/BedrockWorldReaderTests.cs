@@ -195,10 +195,32 @@ public sealed class BedrockWorldReaderTests {
         try {
             var installation = new BedrockInstallation("Microsoft.MinecraftUWP_8wekyb3d8bbwe", "package", "app", "1", "x64", "正式版", "未知", "未知");
             var candidates = new BedrockDataRootFinder(Path.Combine(roaming, "local"), roaming).Find(installation);
-            Check(candidates.Count == 2 && !candidates.Single(candidate => candidate.Path == root).SupportsWorlds,
+            Check(candidates.Count == 2 && !candidates.Single(candidate => candidate.Path == root).SupportsWorlds &&
+                candidates.Single(candidate => candidate.Path == root).Kind == BedrockDataRootKind.GdkShared &&
+                candidates.Single(candidate => candidate.SupportsWorlds).Kind == BedrockDataRootKind.GdkAccountCandidate,
                 "shared content was not distinguished from user worlds");
         } finally { Directory.Delete(root); Directory.Delete(games); Directory.Delete(shared); }
     });
+
+    public void LimitsExperimentalActionsToObservedPackageAndRootKind() {
+        var installation = new BedrockInstallation("Microsoft.MinecraftUWP_8wekyb3d8bbwe",
+            "Microsoft.MinecraftUWP_1.26.5203.0_x64__8wekyb3d8bbwe", "Microsoft.MinecraftUWP_8wekyb3d8bbwe!Game",
+            "1.26.5203.0", "x64", "正式版", "未知", "未知");
+        var shared = new BedrockDataRoot("shared", "renamed label", false, BedrockDataRootKind.GdkShared);
+        var account = new BedrockDataRoot("account", "renamed label", true, BedrockDataRootKind.GdkAccountCandidate);
+        var unknown = new BedrockDataRoot("unknown", "GDK 共享内容目录", false);
+        var world = new BedrockWorldInfo("world", "fixture", true, [], [], null);
+        Check(BedrockCapabilities.CanManageResourcePacks(installation, shared), "verified resource target was rejected");
+        Check(BedrockCapabilities.CanEditWorldPacks(installation, account, world), "experimental world target was rejected");
+        Check(!BedrockCapabilities.CanManageResourcePacks(installation, unknown), "display label was trusted as root type");
+        Check(!BedrockCapabilities.CanEditWorldPacks(installation, shared, world), "shared content root accepted for world edit");
+        var other = new BedrockInstallation(installation.FamilyName, "other-package", installation.AppUserModelId,
+            installation.Version, installation.Architecture, installation.Channel, installation.RuntimeEvidence, installation.GamingServices);
+        Check(!BedrockCapabilities.CanManageResourcePacks(other, shared) && !BedrockCapabilities.CanEditWorldPacks(other, account, world),
+            "unverified package accepted for experimental writes");
+        var invalidWorld = new BedrockWorldInfo("world", "fixture", true, [], [], "unreadable");
+        Check(!BedrockCapabilities.CanEditWorldPacks(installation, account, invalidWorld), "unreadable world accepted");
+    }
 
     public void DetectsWorldPackUsageAndIncompleteWorlds() => WithWorld((_, root, world) => {
         string config = Path.Combine(world, "world_resource_packs.json");

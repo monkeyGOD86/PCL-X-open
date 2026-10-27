@@ -32,6 +32,7 @@ public class BedrockServiceTests {
             worldTests.PreservesStagedFilesWhenRestoreFails,
             worldTests.RejectsSharedRootForWorldOperations,
             worldTests.DistinguishesSharedContentDirectory,
+            worldTests.LimitsExperimentalActionsToObservedPackageAndRootKind,
             worldTests.DetectsWorldPackUsageAndIncompleteWorlds,
             packTests.InspectsUnpackedPackAndDetectsInstalledConflicts,
             packTests.InstallsDirectoryWithoutOverwritingAndRejectsDuplicates,

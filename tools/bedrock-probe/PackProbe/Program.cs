@@ -165,8 +165,9 @@ internal static class Program {
         string.Equals(before.AppUserModelId, after.AppUserModelId, StringComparison.OrdinalIgnoreCase);
 
     private static bool SameScope(IReadOnlyList<BedrockDataRoot> before, IReadOnlyList<BedrockDataRoot> after) =>
-        before.Select(item => item.Path).OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
-            .SequenceEqual(after.Select(item => item.Path).OrderBy(path => path, StringComparer.OrdinalIgnoreCase), StringComparer.OrdinalIgnoreCase);
+        before.Count == after.Count && before.All(item => after.Any(other =>
+            string.Equals(item.Path, other.Path, StringComparison.OrdinalIgnoreCase) &&
+            item.Kind == other.Kind && item.SupportsWorlds == other.SupportsWorlds));
 
     private static bool ValidateFixture(string fixture) {
         string path = Path.GetFullPath(fixture).TrimEnd(Path.DirectorySeparatorChar);

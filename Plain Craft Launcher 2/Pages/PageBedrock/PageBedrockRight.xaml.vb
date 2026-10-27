@@ -646,9 +646,7 @@ Public Class PageBedrockRight
     End Sub
 
     Private Shared Function IsEligibleWorldTarget(Installation As BedrockInstallation, Root As BedrockDataRoot, World As BedrockWorldInfo) As Boolean
-        Return Installation IsNot Nothing AndAlso Root IsNot Nothing AndAlso World IsNot Nothing AndAlso World.HasLevelData AndAlso World.Warning Is Nothing AndAlso
-               Installation.FamilyName = "Microsoft.MinecraftUWP_8wekyb3d8bbwe" AndAlso Installation.Version = "1.26.5203.0" AndAlso Installation.Architecture = "x64" AndAlso
-               Installation.AppUserModelId = "Microsoft.MinecraftUWP_8wekyb3d8bbwe!Game" AndAlso Root.SupportsWorlds AndAlso Root.Source = "GDK 用户目录候选"
+        Return BedrockCapabilities.CanEditWorldPacks(Installation, Root, World)
     End Function
 
     Private Sub RefreshWorldAddonButtons()
@@ -915,22 +913,19 @@ Public Class PageBedrockRight
             Throw New InvalidOperationException("游戏注册状态已变化，请刷新后重试。")
         End If
         Dim Roots = (New BedrockDataRootFinder()).Find(Installation)
-        If Not Roots.Any(Function(Item) String.Equals(Item.Path, Root.Path, StringComparison.OrdinalIgnoreCase) AndAlso Item.Source = Root.Source) Then
+        If Not Roots.Any(Function(Item) String.Equals(Item.Path, Root.Path, StringComparison.OrdinalIgnoreCase) AndAlso Item.Kind = Root.Kind AndAlso Item.SupportsWorlds = Root.SupportsWorlds) Then
             Throw New InvalidOperationException("目标数据目录已变化，请重新选择。")
         End If
         Return Roots
     End Function
 
     Private Shared Function SameRoots(First As IReadOnlyList(Of BedrockDataRoot), Second As IReadOnlyList(Of BedrockDataRoot)) As Boolean
-        Return First.Select(Function(Item) Item.Path).OrderBy(Function(Item) Item, StringComparer.OrdinalIgnoreCase).
-            SequenceEqual(Second.Select(Function(Item) Item.Path).OrderBy(Function(Item) Item, StringComparer.OrdinalIgnoreCase), StringComparer.OrdinalIgnoreCase)
+        Return First.Count = Second.Count AndAlso First.All(Function(Item) Second.Any(Function(Other) String.Equals(Item.Path, Other.Path, StringComparison.OrdinalIgnoreCase) AndAlso
+                                                                                                  Item.Kind = Other.Kind AndAlso Item.SupportsWorlds = Other.SupportsWorlds))
     End Function
 
     Private Shared Function IsValidatedResourceTarget(Installation As BedrockInstallation, Root As BedrockDataRoot) As Boolean
-        Return Installation IsNot Nothing AndAlso Root IsNot Nothing AndAlso
-               Installation.FamilyName = "Microsoft.MinecraftUWP_8wekyb3d8bbwe" AndAlso
-               Installation.Version = "1.26.5203.0" AndAlso Installation.Architecture = "x64" AndAlso
-               Installation.AppUserModelId = "Microsoft.MinecraftUWP_8wekyb3d8bbwe!Game" AndAlso Root.Source = "GDK 共享内容目录"
+        Return BedrockCapabilities.CanManageResourcePacks(Installation, Root)
     End Function
 
     Private Sub RefreshInstallPackButton()

@@ -2,10 +2,13 @@ using System.Text;
 
 namespace PCLCS.Bedrock;
 
-public sealed class BedrockDataRoot(string path, string source, bool supportsWorlds = true) {
+public enum BedrockDataRootKind { Unknown, LegacyUwpCandidate, GdkAccountCandidate, GdkShared }
+
+public sealed class BedrockDataRoot(string path, string source, bool supportsWorlds = true, BedrockDataRootKind kind = BedrockDataRootKind.Unknown) {
     public string Path { get; } = path;
     public string Source { get; } = source;
     public bool SupportsWorlds { get; } = supportsWorlds;
+    public BedrockDataRootKind Kind { get; } = kind;
 }
 
 public sealed class BedrockWorldInfo(string path, string name, bool hasLevelData,
@@ -29,7 +32,7 @@ public sealed class BedrockDataRootFinder(string localAppData, string roamingApp
             throw new ArgumentException("不支持的游戏安装。", nameof(installation));
         var result = new List<BedrockDataRoot>();
         string uwp = System.IO.Path.Combine(localAppData, "Packages", installation.FamilyName, "LocalState", "games", "com.mojang");
-        AddIfPresent(result, uwp, "旧 UWP 候选");
+        AddIfPresent(result, uwp, "旧 UWP 候选", true, BedrockDataRootKind.LegacyUwpCandidate);
         string productFolder = installation.FamilyName.StartsWith("Microsoft.MinecraftWindowsBeta_", StringComparison.Ordinal)
             ? "Minecraft Bedrock Preview" : "Minecraft Bedrock";
         string users = System.IO.Path.Combine(roamingAppData, productFolder, "Users");
@@ -40,16 +43,17 @@ public sealed class BedrockDataRootFinder(string localAppData, string roamingApp
                 if (++scanned > 128) throw new InvalidDataException("发现过多的数据目录。");
                 bool shared = string.Equals(System.IO.Path.GetFileName(user), "shared", StringComparison.OrdinalIgnoreCase);
                 AddIfPresent(result, System.IO.Path.Combine(user, "games", "com.mojang"),
-                    shared ? "GDK 共享内容目录" : "GDK 用户目录候选", !shared);
+                    shared ? "GDK 共享内容目录" : "GDK 用户目录候选", !shared,
+                    shared ? BedrockDataRootKind.GdkShared : BedrockDataRootKind.GdkAccountCandidate);
             }
         }
         return result;
     }
 
-    private static void AddIfPresent(List<BedrockDataRoot> result, string path, string source, bool supportsWorlds = true) {
+    private static void AddIfPresent(List<BedrockDataRoot> result, string path, string source, bool supportsWorlds, BedrockDataRootKind kind) {
         if (!Directory.Exists(path)) return;
         EnsureNoReparsePoints(path);
-        result.Add(new(System.IO.Path.GetFullPath(path), source, supportsWorlds));
+        result.Add(new(System.IO.Path.GetFullPath(path), source, supportsWorlds, kind));
     }
 
     internal static void EnsureNoReparsePoints(string path) {
