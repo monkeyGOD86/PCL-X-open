@@ -23,7 +23,9 @@ public class BedrockServiceTests {
             worldTests.RejectsBackupInsideGameData,
             worldTests.RefusesToOverwriteExistingBackup,
             worldTests.RestoresAsNewWithoutOverwritingOriginal,
-            worldTests.RejectsCorruptRestoreBeforeCreatingWorld];
+            worldTests.RejectsCorruptRestoreBeforeCreatingWorld,
+            worldTests.RejectsSharedRootForWorldOperations,
+            worldTests.DistinguishesSharedContentDirectory];
         int failures = 0;
         foreach (var test in cases) {
             try { test(); Console.WriteLine($"PASS {test.Method.Name}"); }

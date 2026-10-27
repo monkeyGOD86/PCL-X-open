@@ -112,6 +112,28 @@ public sealed class BedrockWorldReaderTests {
         } finally { File.Delete(backup); }
     });
 
+    public void RejectsSharedRootForWorldOperations() => WithWorld((_, root, world) => {
+        File.WriteAllText(Path.Combine(world, "level.dat"), "fixture");
+        var shared = new BedrockDataRoot(root, "shared", false);
+        try { BedrockWorldReader.Read(shared); throw new Exception("shared root accepted for world listing"); }
+        catch (InvalidDataException) { }
+        try { BedrockWorldBackup.RestoreAsNew(shared, "missing.zip"); throw new Exception("shared root accepted for restoration"); }
+        catch (InvalidDataException) { }
+    });
+
+    public void DistinguishesSharedContentDirectory() => WithWorld((roaming, _, _) => {
+        string shared = Path.Combine(roaming, "Minecraft Bedrock", "Users", "shared");
+        string games = Path.Combine(shared, "games");
+        string root = Path.Combine(games, "com.mojang");
+        Directory.CreateDirectory(root);
+        try {
+            var installation = new BedrockInstallation("Microsoft.MinecraftUWP_8wekyb3d8bbwe", "package", "app", "1", "x64", "正式版", "未知", "未知");
+            var candidates = new BedrockDataRootFinder(Path.Combine(roaming, "local"), roaming).Find(installation);
+            Check(candidates.Count == 2 && !candidates.Single(candidate => candidate.Path == root).SupportsWorlds,
+                "shared content was not distinguished from user worlds");
+        } finally { Directory.Delete(root); Directory.Delete(games); Directory.Delete(shared); }
+    });
+
     private static void WithWorld(Action<string, string, string> test) {
         string temp = Path.Combine(Path.GetTempPath(), "pcl-bedrock-world-test-" + Guid.NewGuid().ToString("N"));
         string product = Path.Combine(temp, "Minecraft Bedrock");

@@ -15,11 +15,12 @@
 - Visual Studio 2022 MSBuild Debug 和 Release 构建成功；测试程序覆盖包解析、平台错误、世界元数据以及备份/恢复。最新 Debug 运行通过 16 组测试，备份与恢复使用隔离的临时测试目录。
 - 当前 Windows 用户的正式版包 `Microsoft.MinecraftUWP_8wekyb3d8bbwe`（包版本 `1.26.5203.0`）通过系统应用入口发起启动，Windows 返回接受请求，随后观察到 `Minecraft.Windows` 进程。
 - 实际 WPF 页面显示安装信息；点击启动后显示“Windows 已接受启动请求”，并可返回 Java 启动页面。Java 版游戏本体和登录流程尚未回归。
-- 游戏清单声明了 `.mcpack`、`.mcaddon` 文件入口；尚未验证实际导入与回滚。当前机器的 GDK 候选数据根下有两个用户目录，不能仅凭目录存在推断当前游戏账户使用哪个目录。
+- 游戏清单声明了 `.mcpack`、`.mcaddon` 文件入口；尚未验证实际导入与回滚。当前机器的 GDK `Users` 下存在共享目录和账户目录，不能仅凭目录存在推断当前游戏账户使用哪个目录。
 
 ## 未完成及门槛
 
 - 附加包导入、目录包、安装/卸载、冲突检查和世界附加包配置尚未实现。不能将只读预览称为导入成功。任何游戏数据写入前须确认目标安装和数据根，并具备可验证的备份/恢复方案。
 - 世界恢复在目标数据根下建立临时目录，校验完成后同卷移动到新世界目录；进程中断可能留下 `.pcl-restore-*` 临时目录，不会自动删除。常见进程检查和用户确认无法证明云同步完成或覆盖所有游戏进程；当前未在真实游戏存档上测试备份或恢复，也未验证游戏能否读取恢复的新世界。
+- Minecraft 官方文档将 GDK [共享创作者内容目录](https://learn.microsoft.com/en-us/minecraft/creator/documents/gdkpcprojectfolder) 与 [按用户保存的世界目录](https://github.com/MicrosoftDocs/minecraft-creator/blob/main/creator/Documents/BedrockServer/getting-started.md) 区分；共享目录不得作为世界恢复目标。具体用户目录仍需用户确认。
 - UWP 旧版本、Preview、未安装/授权失败、服务损坏及多种 Windows 环境尚未做真实设备验证。`App` 入口依据历史包惯例识别，兼容性尚未实测。
 - 历史版本、多实例和原生 Mod 仍属独立验证项。许可证全文及依赖许可仍需在发布前核对。

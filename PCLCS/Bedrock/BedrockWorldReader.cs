@@ -2,9 +2,10 @@ using System.Text;
 
 namespace PCLCS.Bedrock;
 
-public sealed class BedrockDataRoot(string path, string source) {
+public sealed class BedrockDataRoot(string path, string source, bool supportsWorlds = true) {
     public string Path { get; } = path;
     public string Source { get; } = source;
+    public bool SupportsWorlds { get; } = supportsWorlds;
 }
 
 public sealed class BedrockWorldInfo(string path, string name, bool hasLevelData,
@@ -37,16 +38,18 @@ public sealed class BedrockDataRootFinder(string localAppData, string roamingApp
             int scanned = 0;
             foreach (string user in Directory.EnumerateDirectories(users).Take(129)) {
                 if (++scanned > 128) throw new InvalidDataException("发现过多的数据目录。");
-                AddIfPresent(result, System.IO.Path.Combine(user, "games", "com.mojang"), "GDK 用户目录候选");
+                bool shared = string.Equals(System.IO.Path.GetFileName(user), "shared", StringComparison.OrdinalIgnoreCase);
+                AddIfPresent(result, System.IO.Path.Combine(user, "games", "com.mojang"),
+                    shared ? "GDK 共享内容目录" : "GDK 用户目录候选", !shared);
             }
         }
         return result;
     }
 
-    private static void AddIfPresent(List<BedrockDataRoot> result, string path, string source) {
+    private static void AddIfPresent(List<BedrockDataRoot> result, string path, string source, bool supportsWorlds = true) {
         if (!Directory.Exists(path)) return;
         EnsureNoReparsePoints(path);
-        result.Add(new(System.IO.Path.GetFullPath(path), source));
+        result.Add(new(System.IO.Path.GetFullPath(path), source, supportsWorlds));
     }
 
     internal static void EnsureNoReparsePoints(string path) {
@@ -62,6 +65,7 @@ public sealed class BedrockDataRootFinder(string localAppData, string roamingApp
 /// <summary>Reads world names and configured pack references without writing game data.</summary>
 public static class BedrockWorldReader {
     public static IReadOnlyList<BedrockWorldInfo> Read(BedrockDataRoot root) {
+        if (!root.SupportsWorlds) throw new InvalidDataException("共享内容目录不是用户世界目录。");
         BedrockDataRootFinder.EnsureNoReparsePoints(root.Path);
         string worldRoot = System.IO.Path.Combine(root.Path, "minecraftWorlds");
         if (!Directory.Exists(worldRoot)) return [];

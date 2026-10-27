@@ -90,10 +90,12 @@ Public Class PageBedrockRight
     End Sub
 
     Private Sub RootSelectionChanged(sender As Object, e As SelectionChangedEventArgs) Handles ComboRoots.SelectionChanged
-        BtnReadWorlds.IsEnabled = Not IsBusy AndAlso ComboRoots.SelectedItem IsNot Nothing
-        BtnRestore.IsEnabled = Not IsBusy AndAlso ComboRoots.SelectedItem IsNot Nothing
+        Dim Item = TryCast(ComboRoots.SelectedItem, MyComboBoxItem)
+        Dim Root = TryCast(Item?.Tag, BedrockDataRoot)
+        BtnReadWorlds.IsEnabled = Not IsBusy AndAlso Root IsNot Nothing AndAlso Root.SupportsWorlds
+        BtnRestore.IsEnabled = Not IsBusy AndAlso Root IsNot Nothing AndAlso Root.SupportsWorlds
         ComboWorlds.Items.Clear()
-        LabWorldStatus.Text = ""
+        LabWorldStatus.Text = If(Root IsNot Nothing AndAlso Not Root.SupportsWorlds, "共享内容目录不用于管理账户世界。", "")
         LabWorldDetails.Text = ""
     End Sub
 
@@ -288,8 +290,10 @@ Public Class PageBedrockRight
         BtnStart.IsEnabled = Not Value AndAlso Installation IsNot Nothing AndAlso Installation.CanLaunch
         BtnWorlds.IsEnabled = Not Value AndAlso Installation IsNot Nothing
         ComboRoots.IsEnabled = Not Value AndAlso ComboRoots.Items.Count > 0
-        BtnReadWorlds.IsEnabled = Not Value AndAlso ComboRoots.SelectedItem IsNot Nothing
-        BtnRestore.IsEnabled = Not Value AndAlso ComboRoots.SelectedItem IsNot Nothing
+        Dim RootItem = TryCast(ComboRoots.SelectedItem, MyComboBoxItem)
+        Dim Root = TryCast(RootItem?.Tag, BedrockDataRoot)
+        BtnReadWorlds.IsEnabled = Not Value AndAlso Root IsNot Nothing AndAlso Root.SupportsWorlds
+        BtnRestore.IsEnabled = Not Value AndAlso Root IsNot Nothing AndAlso Root.SupportsWorlds
         ComboWorlds.IsEnabled = Not Value AndAlso ComboWorlds.Items.Count > 0
         Dim WorldItem = TryCast(ComboWorlds.SelectedItem, MyComboBoxItem)
         Dim World = TryCast(WorldItem?.Tag, BedrockWorldInfo)

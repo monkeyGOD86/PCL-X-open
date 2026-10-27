@@ -17,6 +17,7 @@ public static class BedrockWorldBackup {
     private const string ManifestName = "_pcl_backup/manifest.json";
 
     public static BedrockBackupInfo Create(BedrockDataRoot root, BedrockWorldInfo world, string destination) {
+        if (!root.SupportsWorlds) throw new InvalidDataException("共享内容目录不是用户世界目录。");
         string worldRoot = Path.GetFullPath(Path.Combine(root.Path, "minecraftWorlds"));
         string worldPath = Path.GetFullPath(world.Path).TrimEnd(Path.DirectorySeparatorChar);
         if (!string.Equals(Path.GetDirectoryName(worldPath), worldRoot, StringComparison.OrdinalIgnoreCase))
@@ -184,6 +185,7 @@ public static class BedrockWorldBackup {
 
     /// <summary>Restores a verified backup as a new world, leaving existing worlds untouched.</summary>
     public static string RestoreAsNew(BedrockDataRoot root, string backupPath) {
+        if (!root.SupportsWorlds) throw new InvalidDataException("共享内容目录不是用户世界目录。");
         string rootPath = Path.GetFullPath(root.Path).TrimEnd(Path.DirectorySeparatorChar);
         string worldsPath = Path.Combine(rootPath, "minecraftWorlds");
         BedrockDataRootFinder.EnsureNoReparsePoints(rootPath);
