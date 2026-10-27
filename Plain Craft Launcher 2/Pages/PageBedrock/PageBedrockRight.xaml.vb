@@ -460,7 +460,7 @@ Public Class PageBedrockRight
         Dim Installation = TryCast(TryCast(ComboInstall.SelectedItem, MyComboBoxItem)?.Tag, BedrockInstallation)
         Dim Root = TryCast(TryCast(ComboRoots.SelectedItem, MyComboBoxItem)?.Tag, BedrockDataRoot)
         Dim World = TryCast(TryCast(ComboWorlds.SelectedItem, MyComboBoxItem)?.Tag, BedrockWorldInfo)
-        If IsBusy OrElse Not IsEligibleWorldTarget(Installation, Root, World) Then Return
+        If IsBusy OrElse Installation Is Nothing OrElse Root Is Nothing OrElse Not Root.SupportsWorlds OrElse World Is Nothing Then Return
         ComboWorldAddons.Items.Clear()
         LabWorldAddonStatus.Text = "正在读取候选目录中的附加包…"
         SetBusy(True)
@@ -473,7 +473,8 @@ Public Class PageBedrockRight
                 Dim Pack = Choice.Addon.Manifest
                 ComboWorldAddons.Items.Add(New MyComboBoxItem With {.Content = Choice.Root.Source & " · " & Pack.Name & " · " & Pack.Version, .Tag = Choice})
             Next
-            LabWorldAddonStatus.Text = If(Choices.Count = 0, "候选目录中没有可识别的附加包。", $"发现 {Choices.Count} 个候选包；请选择后检查其使用范围。")
+            LabWorldAddonStatus.Text = If(Choices.Count = 0, "候选目录中没有可识别的附加包。", $"发现 {Choices.Count} 个候选包；请选择后检查其使用范围。") &
+                                       If(IsEligibleWorldTarget(Installation, Root, World), "", vbCrLf & "当前目标仅支持只读查看；世界配置写入尚未验证。")
         Catch ex As Exception
             LabWorldAddonStatus.Text = "读取候选附加包失败：" & ex.Message
             Logger.Warn(ex, "读取世界附加包候选失败")
@@ -506,6 +507,10 @@ Public Class PageBedrockRight
             LabWorldAddonStatus.Text = $"清单名称：{Pack.Name}（可能为本地化键）　版本：{Pack.Version}" & vbCrLf & $"UUID：{Pack.Uuid}　类型：{String.Join(", ", Pack.Modules)}" & vbCrLf &
                                        If(Pack.Modules.Contains("resources"), "资源包使用范围：" & Pack.PackScope & vbCrLf, "") &
                                        "包目录：" & Choice.Addon.Path
+            Dim Installation = TryCast(TryCast(ComboInstall.SelectedItem, MyComboBoxItem)?.Tag, BedrockInstallation)
+            Dim Root = TryCast(TryCast(ComboRoots.SelectedItem, MyComboBoxItem)?.Tag, BedrockDataRoot)
+            Dim World = TryCast(TryCast(ComboWorlds.SelectedItem, MyComboBoxItem)?.Tag, BedrockWorldInfo)
+            If Not IsEligibleWorldTarget(Installation, Root, World) Then LabWorldAddonStatus.Text &= vbCrLf & "当前目标仅支持只读查看；世界配置写入尚未验证。"
         End If
         RefreshWorldAddonButtons()
     End Sub
@@ -656,12 +661,13 @@ Public Class PageBedrockRight
         Dim Root = TryCast(TryCast(ComboRoots.SelectedItem, MyComboBoxItem)?.Tag, BedrockDataRoot)
         Dim World = TryCast(TryCast(ComboWorlds.SelectedItem, MyComboBoxItem)?.Tag, BedrockWorldInfo)
         Dim Choice = TryCast(TryCast(ComboWorldAddons.SelectedItem, MyComboBoxItem)?.Tag, WorldAddonChoice)
-        Dim Eligible = Not IsBusy AndAlso IsEligibleWorldTarget(Installation, Root, World)
-        BtnReadWorldAddons.IsEnabled = Eligible
-        BtnRestoreWorldConfig.IsEnabled = Eligible
-        ComboWorldAddons.IsEnabled = Eligible AndAlso ComboWorldAddons.Items.Count > 0
-        BtnWorldEnableAddon.IsEnabled = Eligible AndAlso Choice IsNot Nothing
-        BtnWorldDisableAddon.IsEnabled = Eligible AndAlso Choice IsNot Nothing
+        Dim CanRead = Not IsBusy AndAlso Installation IsNot Nothing AndAlso Root IsNot Nothing AndAlso Root.SupportsWorlds AndAlso World IsNot Nothing
+        Dim CanWrite = CanRead AndAlso IsEligibleWorldTarget(Installation, Root, World)
+        BtnReadWorldAddons.IsEnabled = CanRead
+        BtnRestoreWorldConfig.IsEnabled = CanWrite
+        ComboWorldAddons.IsEnabled = CanRead AndAlso ComboWorldAddons.Items.Count > 0
+        BtnWorldEnableAddon.IsEnabled = CanWrite AndAlso Choice IsNot Nothing
+        BtnWorldDisableAddon.IsEnabled = CanWrite AndAlso Choice IsNot Nothing
     End Sub
 
     Private Async Sub BackupClicked(sender As Object, e As EventArgs) Handles BtnBackup.Click
