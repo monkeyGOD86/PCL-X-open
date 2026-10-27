@@ -7,6 +7,7 @@ public class BedrockServiceTests {
     public static int Main() {
         var tests = new BedrockServiceTests();
         var packTests = new BedrockPackInspectorTests();
+        var worldTests = new BedrockWorldReaderTests();
         Action[] cases = [tests.DetectionDistinguishesNoInstallationFromQueryFailure,
             tests.LaunchRejectsRegistrationChangedSinceSelection,
             tests.LaunchRevalidatesAndPassesTheRegisteredApplicationToWindows,
@@ -15,7 +16,14 @@ public class BedrockServiceTests {
             packTests.ParsesResourcePackMetadata,
             packTests.ParsesNestedAddon,
             packTests.RejectsUnsafePathsAndDuplicateNames,
-            packTests.RejectsWorldAndInvalidManifest];
+            packTests.RejectsWorldAndInvalidManifest,
+            worldTests.FindsCandidateAndReadsWorldPackReferences,
+            worldTests.ReportsInvalidWorldMetadataWithoutDiscardingWorld,
+            worldTests.CreatesAndVerifiesBackupWithoutChangingWorld,
+            worldTests.RejectsBackupInsideGameData,
+            worldTests.RefusesToOverwriteExistingBackup,
+            worldTests.RestoresAsNewWithoutOverwritingOriginal,
+            worldTests.RejectsCorruptRestoreBeforeCreatingWorld];
         int failures = 0;
         foreach (var test in cases) {
             try { test(); Console.WriteLine($"PASS {test.Method.Name}"); }
