@@ -41,6 +41,51 @@ public static class BedrockPackInspector {
         return result;
     }
 
+    /// <summary>Inspects an unpacked pack without following links or modifying its files.</summary>
+    public static BedrockPackInfo InspectDirectory(string directory) {
+        if (string.IsNullOrWhiteSpace(directory)) throw new InvalidDataException("未选择附加包文件夹。");
+        string root = Path.GetFullPath(directory).TrimEnd(Path.DirectorySeparatorChar);
+        if (string.Equals(root, Path.GetPathRoot(root)?.TrimEnd(Path.DirectorySeparatorChar), StringComparison.OrdinalIgnoreCase))
+            throw new InvalidDataException("请选择具体的附加包文件夹。");
+        BedrockDataRootFinder.EnsureNoReparsePoints(root);
+        var pending = new Stack<string>();
+        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        pending.Push(root);
+        int entries = 0;
+        long total = 0;
+        while (pending.Count > 0) {
+            string folder = pending.Pop();
+            foreach (string path in Directory.EnumerateFileSystemEntries(folder)) {
+                if (++entries > MaxEntries) throw new InvalidDataException("附加包条目过多。");
+                var attributes = File.GetAttributes(path);
+                if ((attributes & FileAttributes.ReparsePoint) != 0) throw new InvalidDataException("附加包包含链接或重解析点。");
+                string relative = ValidatePath(path.Substring(root.Length + 1).Replace('\\', '/'));
+                if (!names.Add(relative)) throw new InvalidDataException("附加包包含重复或冲突的路径。");
+                if ((attributes & FileAttributes.Directory) != 0) pending.Push(path);
+                else {
+                    long size = new FileInfo(path).Length;
+                    if (size > MaxEntryBytes || size > MaxTotalBytes - total) throw new InvalidDataException("附加包超过大小限制。");
+                    total += size;
+                }
+            }
+        }
+        return InspectManifestFile(Path.Combine(root, "manifest.json"));
+    }
+
+    internal static BedrockPackInfo InspectManifestFile(string path) {
+        if ((File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0) throw new InvalidDataException("清单是链接。");
+        using var input = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+        if (input.Length > MaxManifestBytes) throw new InvalidDataException("清单过大。");
+        using var content = new MemoryStream();
+        byte[] buffer = new byte[4096];
+        int count;
+        while ((count = input.Read(buffer, 0, buffer.Length)) > 0) {
+            if (content.Length + count > MaxManifestBytes) throw new InvalidDataException("清单过大。");
+            content.Write(buffer, 0, count);
+        }
+        return ParseManifest(content.ToArray());
+    }
+
     private static List<BedrockPackInfo> InspectArchive(ZipArchive archive, bool addon, ArchiveBudget budget) {
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var files = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -108,7 +153,11 @@ public static class BedrockPackInspector {
         int unixType = (entry.ExternalAttributes >> 16) & 0xf000;
         if (unixType == 0xa000 || (entry.ExternalAttributes & 0x400) != 0)
             throw new InvalidDataException("压缩包包含链接或重解析点。");
-        string name = entry.FullName.Replace('\\', '/').Normalize(NormalizationForm.FormC);
+        return ValidatePath(entry.FullName.Replace('\\', '/'));
+    }
+
+    private static string ValidatePath(string path) {
+        string name = path.Normalize(NormalizationForm.FormC);
         if (name.Length == 0 || name.Length > 1024 || name.StartsWith("/", StringComparison.Ordinal))
             throw new InvalidDataException("压缩包包含无效路径。");
         var parts = name.TrimEnd('/').Split('/');

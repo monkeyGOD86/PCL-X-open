@@ -47,6 +47,28 @@ public sealed class BedrockPackInspectorTests {
         WithArchive(".mcpack", zip => Add(zip, "manifest.json", Manifest.Replace("22222222-2222-4222-8222-222222222222", "11111111-1111-4111-8111-111111111111")), Reject);
     }
 
+    public void InspectsUnpackedPackAndDetectsInstalledConflicts() {
+        string root = Path.Combine(Path.GetTempPath(), "pcl-bedrock-pack-test-" + Guid.NewGuid().ToString("N"));
+        string packs = Path.Combine(root, "resource_packs");
+        string first = Path.Combine(packs, "first");
+        string secondParent = Path.Combine(packs, "second");
+        string second = Path.Combine(secondParent, "2.0.0");
+        Directory.CreateDirectory(first);
+        Directory.CreateDirectory(second);
+        try {
+            File.WriteAllText(Path.Combine(first, "manifest.json"), Manifest);
+            File.WriteAllText(Path.Combine(second, "manifest.json"), Manifest.Replace("[1,2,3]", "[2,0,0]"));
+            Check(BedrockPackInspector.InspectDirectory(first).Version == "1.2.3", "directory pack not parsed");
+            var installed = BedrockAddonCatalog.Read(new BedrockDataRoot(root, "fixture", false));
+            Check(installed.Count == 2 && installed.All(pack => pack.Warnings.Any(warning => warning.Contains("不同版本"))),
+                "UUID conflict was not reported");
+        } finally {
+            File.Delete(Path.Combine(first, "manifest.json"));
+            File.Delete(Path.Combine(second, "manifest.json"));
+            Directory.Delete(first); Directory.Delete(second); Directory.Delete(secondParent); Directory.Delete(packs); Directory.Delete(root);
+        }
+    }
+
     private static void Add(ZipArchive zip, string name, string text) {
         using var writer = new StreamWriter(zip.CreateEntry(name).Open(), new UTF8Encoding(false));
         writer.Write(text);

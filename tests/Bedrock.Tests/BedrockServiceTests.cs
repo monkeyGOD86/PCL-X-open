@@ -25,7 +25,8 @@ public class BedrockServiceTests {
             worldTests.RestoresAsNewWithoutOverwritingOriginal,
             worldTests.RejectsCorruptRestoreBeforeCreatingWorld,
             worldTests.RejectsSharedRootForWorldOperations,
-            worldTests.DistinguishesSharedContentDirectory];
+            worldTests.DistinguishesSharedContentDirectory,
+            packTests.InspectsUnpackedPackAndDetectsInstalledConflicts];
         int failures = 0;
         foreach (var test in cases) {
             try { test(); Console.WriteLine($"PASS {test.Method.Name}"); }

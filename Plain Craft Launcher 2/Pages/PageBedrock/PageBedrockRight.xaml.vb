@@ -69,8 +69,11 @@ Public Class PageBedrockRight
         Dim ScrollOperation = Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Loaded, New Action(Sub() PanBack.ScrollToBottom()))
         ComboRoots.Items.Clear()
         ComboWorlds.Items.Clear()
+        ComboAddons.Items.Clear()
         LabWorldStatus.Text = ""
         LabWorldDetails.Text = ""
+        LabAddonStatus.Text = ""
+        LabAddonDetails.Text = ""
         LabRootsStatus.Text = "正在查找候选数据目录…"
         SetBusy(True)
         Try
@@ -94,9 +97,51 @@ Public Class PageBedrockRight
         Dim Root = TryCast(Item?.Tag, BedrockDataRoot)
         BtnReadWorlds.IsEnabled = Not IsBusy AndAlso Root IsNot Nothing AndAlso Root.SupportsWorlds
         BtnRestore.IsEnabled = Not IsBusy AndAlso Root IsNot Nothing AndAlso Root.SupportsWorlds
+        BtnListAddons.IsEnabled = Not IsBusy AndAlso Root IsNot Nothing
         ComboWorlds.Items.Clear()
+        ComboAddons.Items.Clear()
         LabWorldStatus.Text = If(Root IsNot Nothing AndAlso Not Root.SupportsWorlds, "共享内容目录不用于管理账户世界。", "")
         LabWorldDetails.Text = ""
+        LabAddonStatus.Text = ""
+        LabAddonDetails.Text = ""
+    End Sub
+
+    Private Async Sub ReadAddonsClicked(sender As Object, e As EventArgs) Handles BtnListAddons.Click
+        Dim Item = TryCast(ComboRoots.SelectedItem, MyComboBoxItem)
+        Dim Root = TryCast(Item?.Tag, BedrockDataRoot)
+        If IsBusy OrElse Root Is Nothing Then Return
+        ComboAddons.Items.Clear()
+        LabAddonDetails.Text = ""
+        LabAddonStatus.Text = "正在读取附加包…"
+        SetBusy(True)
+        Try
+            Dim Addons = Await Task.Run(Function() BedrockAddonCatalog.Read(Root))
+            For Each Addon In Addons
+                Dim Name = If(Addon.Manifest Is Nothing, Path.GetFileName(Addon.Path), Addon.Manifest.Name)
+                ComboAddons.Items.Add(New MyComboBoxItem With {.Content = Addon.Category & " · " & Name, .Tag = Addon})
+            Next
+            LabAddonStatus.Text = If(Addons.Count = 0, "此目录中没有发现附加包。", $"发现 {Addons.Count} 个附加包，请选择查看详情。")
+        Catch ex As Exception
+            LabAddonStatus.Text = "读取附加包失败：" & ex.Message
+            Logger.Warn(ex, "读取基岩版附加包失败")
+        Finally
+            SetBusy(False)
+        End Try
+    End Sub
+
+    Private Sub AddonSelectionChanged(sender As Object, e As SelectionChangedEventArgs) Handles ComboAddons.SelectionChanged
+        Dim Item = TryCast(ComboAddons.SelectedItem, MyComboBoxItem)
+        Dim Addon = TryCast(Item?.Tag, BedrockInstalledAddon)
+        If Addon Is Nothing Then
+            LabAddonDetails.Text = ""
+        ElseIf Addon.Manifest Is Nothing Then
+            LabAddonDetails.Text = Addon.Error
+        Else
+            Dim Pack = Addon.Manifest
+            LabAddonDetails.Text = $"{Pack.Name}　{Pack.Version}" & vbCrLf & $"UUID：{Pack.Uuid}　类型：{String.Join(", ", Pack.Modules)}" & vbCrLf &
+                                   If(Pack.Dependencies.Count = 0, "", "依赖：" & String.Join(", ", Pack.Dependencies) & vbCrLf) &
+                                   If(Addon.Warnings.Count = 0, "", "提示：" & String.Join("；", Addon.Warnings))
+        End If
     End Sub
 
     Private Async Sub ReadWorldsClicked(sender As Object, e As EventArgs) Handles BtnReadWorlds.Click
@@ -258,20 +303,31 @@ Public Class PageBedrockRight
         If Dialog.ShowDialog() = True Then PreviewPackage(Dialog.FileName)
     End Sub
 
+    Private Async Sub FolderClicked(sender As Object, e As EventArgs) Handles BtnFolder.Click
+        Using Dialog As New System.Windows.Forms.FolderBrowserDialog With {.Description = "选择包含 manifest.json 的附加包文件夹", .ShowNewFolderButton = False}
+            If Dialog.ShowDialog() <> System.Windows.Forms.DialogResult.OK Then Return
+            Dim Folder = Dialog.SelectedPath
+            SetBusy(True)
+            LabPackInfo.Text = "正在检查附加包文件夹…"
+            Try
+                Dim Pack = Await Task.Run(Function() BedrockPackInspector.InspectDirectory(Folder))
+                LabPackInfo.Text = DescribePacks({Pack}) & vbCrLf & "已完成只读预览；导入功能尚待验证。"
+            Catch ex As Exception
+                LabPackInfo.Text = "无法预览附加包文件夹：" & ex.Message
+                Logger.Warn(ex, "基岩版附加包预览失败")
+            Finally
+                SetBusy(False)
+            End Try
+        End Using
+    End Sub
+
     Public Async Sub PreviewPackage(FilePath As String)
         If IsBusy Then Return
         SetBusy(True)
         LabPackInfo.Text = "正在检查附加包…"
         Try
             Dim Packs = Await Task.Run(Function() BedrockPackInspector.Inspect(FilePath))
-            Dim Lines As New List(Of String)
-            For Each Pack In Packs
-                Lines.Add($"{Pack.Name}　{Pack.Version}" & vbCrLf &
-                          $"UUID：{Pack.Uuid}　类型：{String.Join(", ", Pack.Modules)}" & vbCrLf &
-                          If(Pack.Dependencies.Count > 0, "依赖：" & String.Join(", ", Pack.Dependencies) & vbCrLf, "") &
-                          If(Pack.MinEngineVersion IsNot Nothing, "最低游戏版本：" & Pack.MinEngineVersion & vbCrLf, ""))
-            Next
-            LabPackInfo.Text = String.Join(vbCrLf, Lines) & vbCrLf & "已完成只读预览；导入功能尚待验证。"
+            LabPackInfo.Text = DescribePacks(Packs) & vbCrLf & "已完成只读预览；导入功能尚待验证。"
         Catch ex As Exception
             LabPackInfo.Text = "无法预览附加包：" & ex.Message
             Logger.Warn(ex, "基岩版附加包预览失败")
@@ -280,10 +336,22 @@ Public Class PageBedrockRight
         End Try
     End Sub
 
+    Private Shared Function DescribePacks(Packs As IEnumerable(Of BedrockPackInfo)) As String
+        Dim Lines As New List(Of String)
+        For Each Pack In Packs
+            Lines.Add($"{Pack.Name}　{Pack.Version}" & vbCrLf &
+                      $"UUID：{Pack.Uuid}　类型：{String.Join(", ", Pack.Modules)}" & vbCrLf &
+                      If(Pack.Dependencies.Count > 0, "依赖：" & String.Join(", ", Pack.Dependencies) & vbCrLf, "") &
+                      If(Pack.MinEngineVersion IsNot Nothing, "最低游戏版本：" & Pack.MinEngineVersion & vbCrLf, ""))
+        Next
+        Return String.Join(vbCrLf, Lines)
+    End Function
+
     Private Sub SetBusy(Value As Boolean)
         IsBusy = Value
         BtnRefresh.IsEnabled = Not Value
         BtnAddons.IsEnabled = Not Value
+        BtnFolder.IsEnabled = Not Value
         ComboInstall.IsEnabled = Not Value AndAlso ComboInstall.Items.Count > 0
         Dim Item = TryCast(ComboInstall.SelectedItem, MyComboBoxItem)
         Dim Installation = TryCast(Item?.Tag, BedrockInstallation)
@@ -294,6 +362,8 @@ Public Class PageBedrockRight
         Dim Root = TryCast(RootItem?.Tag, BedrockDataRoot)
         BtnReadWorlds.IsEnabled = Not Value AndAlso Root IsNot Nothing AndAlso Root.SupportsWorlds
         BtnRestore.IsEnabled = Not Value AndAlso Root IsNot Nothing AndAlso Root.SupportsWorlds
+        BtnListAddons.IsEnabled = Not Value AndAlso Root IsNot Nothing
+        ComboAddons.IsEnabled = Not Value AndAlso ComboAddons.Items.Count > 0
         ComboWorlds.IsEnabled = Not Value AndAlso ComboWorlds.Items.Count > 0
         Dim WorldItem = TryCast(ComboWorlds.SelectedItem, MyComboBoxItem)
         Dim World = TryCast(WorldItem?.Tag, BedrockWorldInfo)
