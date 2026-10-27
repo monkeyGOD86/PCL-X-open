@@ -34,15 +34,8 @@ public static class BedrockDirectoryInstaller {
         if (ContainsPath(rootPath, sourcePath) || ContainsPath(sourcePath, rootPath))
             throw new InvalidDataException("来源目录和游戏数据目录不能相互包含。");
 
-        // Serialize our own instances. This cannot prevent the game or other tools from writing.
-        using var hash = SHA256.Create();
-        string lockName = "Local\\PCL-Bedrock-" + BitConverter.ToString(hash.ComputeHash(Encoding.UTF8.GetBytes(rootPath.ToUpperInvariant()))).Replace("-", "");
-        using var mutex = new System.Threading.Mutex(false, lockName);
-        bool acquired = false;
-        try {
-            try { acquired = mutex.WaitOne(TimeSpan.FromSeconds(10)); }
-            catch (System.Threading.AbandonedMutexException) { acquired = true; }
-            if (!acquired) throw new IOException("另一个启动器正在操作该数据目录。");
+        // This cannot prevent the game or other tools from writing.
+        using (BedrockRootLock.Acquire(rootPath)) {
             var preview = BedrockPackInspector.InspectDirectory(sourcePath);
             if (preview.Uuid != confirmed.Pack.Uuid || preview.Version != confirmed.Pack.Version ||
                 !string.Equals(Fingerprint(sourcePath), confirmed.Fingerprint, StringComparison.Ordinal))
@@ -78,8 +71,6 @@ public static class BedrockDirectoryInstaller {
                 // Preserve incomplete data rather than recursively deleting a potentially changed tree.
                 throw new IOException("附加包安装未完成，临时目录保留供检查：" + stage, ex);
             }
-        } finally {
-            if (acquired) mutex.ReleaseMutex();
         }
     }
 
@@ -91,7 +82,7 @@ public static class BedrockDirectoryInstaller {
             throw new InvalidDataException("目标目录已存在相同 UUID 的附加包；不会覆盖或安装另一版本。");
     }
 
-    private static void CopyTree(string source, string stage) {
+    internal static void CopyTree(string source, string stage) {
         var pending = new Stack<(string Source, string Target)>();
         pending.Push((source, stage));
         int entries = 0;

@@ -203,6 +203,76 @@ public sealed class BedrockPackInspectorTests {
         } finally { Directory.Delete(fixture, true); }
     }
 
+    public void CommitsAndRollsBackMultiPackTransaction() {
+        string fixture = Path.Combine(Path.GetTempPath(), "pcl-bedrock-transaction-test-" + Guid.NewGuid().ToString("N"));
+        string game = Path.Combine(fixture, "game");
+        string category = Path.Combine(game, "resource_packs");
+        Directory.CreateDirectory(category);
+        try {
+            string first = Path.Combine(fixture, "first"), second = Path.Combine(fixture, "second");
+            Directory.CreateDirectory(first); Directory.CreateDirectory(second);
+            File.WriteAllText(Path.Combine(first, "manifest.json"), Manifest);
+            File.WriteAllText(Path.Combine(second, "manifest.json"), Manifest.Replace("11111111-1111-4111-8111-111111111111", "33333333-3333-4333-8333-333333333333"));
+            var packs = new[] { new BedrockPreparedPack(first, BedrockDirectoryInstaller.Preview(first)),
+                new BedrockPreparedPack(second, BedrockDirectoryInstaller.Preview(second)) };
+            var root = new BedrockDataRoot(game, "fixture");
+            string transaction = BedrockAddonTransaction.Prepare(root, packs);
+            Check(Directory.GetDirectories(category).Length == 0, "prepare installed a package");
+            BedrockAddonTransaction.Commit(root, transaction);
+            Check(Directory.GetDirectories(category).Length == 2, "transaction did not install both packages");
+            BedrockAddonTransaction.Rollback(root, transaction);
+            Check(Directory.GetDirectories(category).Length == 0 && Directory.Exists(Path.Combine(transaction, "pack-0")) &&
+                Directory.Exists(Path.Combine(transaction, "pack-1")), "rollback did not preserve both packages");
+        } finally { Directory.Delete(fixture, true); }
+    }
+
+    public void RecoversInterruptedTransactionAndRefusesChangedContent() {
+        string fixture = Path.Combine(Path.GetTempPath(), "pcl-bedrock-transaction-test-" + Guid.NewGuid().ToString("N"));
+        string game = Path.Combine(fixture, "game"), category = Path.Combine(game, "resource_packs"), source = Path.Combine(fixture, "source");
+        string second = Path.Combine(fixture, "second");
+        Directory.CreateDirectory(category); Directory.CreateDirectory(source); Directory.CreateDirectory(second);
+        try {
+            File.WriteAllText(Path.Combine(source, "manifest.json"), Manifest);
+            File.WriteAllText(Path.Combine(second, "manifest.json"), Manifest.Replace("11111111-1111-4111-8111-111111111111", "33333333-3333-4333-8333-333333333333"));
+            var root = new BedrockDataRoot(game, "fixture");
+            string transaction = BedrockAddonTransaction.Prepare(root, [new BedrockPreparedPack(source, BedrockDirectoryInstaller.Preview(source)),
+                new BedrockPreparedPack(second, BedrockDirectoryInstaller.Preview(second))]);
+            string id = Path.GetFileName(transaction).Substring(".pcl-addon-transaction-".Length);
+            string destination = Path.Combine(category, "pcl-" + id + "-0");
+            Directory.Move(Path.Combine(transaction, "pack-0"), destination); // Simulate interruption after one move.
+            File.WriteAllText(Path.Combine(destination, "new.txt"), "changed");
+            try {
+                BedrockAddonTransaction.Rollback(root, transaction);
+                throw new Exception("modified installed content was moved");
+            } catch (InvalidDataException) { }
+            Check(File.Exists(Path.Combine(destination, "new.txt")), "modified package was lost");
+            File.Delete(Path.Combine(destination, "new.txt"));
+            BedrockAddonTransaction.Rollback(root, transaction);
+            Check(!Directory.Exists(destination) && Directory.Exists(Path.Combine(transaction, "pack-0")) &&
+                Directory.Exists(Path.Combine(transaction, "pack-1")), "interrupted transaction was not recovered");
+            BedrockAddonTransaction.Rollback(root, transaction); // Recovery can be retried.
+        } finally { Directory.Delete(fixture, true); }
+    }
+
+    public void RejectsTamperedTransactionJournal() {
+        string fixture = Path.Combine(Path.GetTempPath(), "pcl-bedrock-transaction-test-" + Guid.NewGuid().ToString("N"));
+        string game = Path.Combine(fixture, "game"), category = Path.Combine(game, "resource_packs"), source = Path.Combine(fixture, "source");
+        Directory.CreateDirectory(category); Directory.CreateDirectory(source);
+        try {
+            File.WriteAllText(Path.Combine(source, "manifest.json"), Manifest);
+            var root = new BedrockDataRoot(game, "fixture");
+            string transaction = BedrockAddonTransaction.Prepare(root, [new BedrockPreparedPack(source, BedrockDirectoryInstaller.Preview(source))]);
+            string journal = Path.Combine(transaction, "journal.json");
+            File.WriteAllText(journal, File.ReadAllText(journal).Replace("resource_packs", "../outside"));
+            try {
+                BedrockAddonTransaction.Commit(root, transaction);
+                throw new Exception("tampered journal accepted");
+            } catch (InvalidDataException) { }
+            Check(Directory.GetDirectories(category).Length == 0 && Directory.Exists(Path.Combine(transaction, "pack-0")),
+                "tampered transaction modified installed packs");
+        } finally { Directory.Delete(fixture, true); }
+    }
+
     private static void Add(ZipArchive zip, string name, string text) {
         using var writer = new StreamWriter(zip.CreateEntry(name).Open(), new UTF8Encoding(false));
         writer.Write(text);
