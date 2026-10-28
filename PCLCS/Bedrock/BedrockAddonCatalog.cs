@@ -64,8 +64,9 @@ public static class BedrockAddonCatalog {
                 bool different = duplicates.Select(other => other.Manifest!.Version).Distinct(StringComparer.OrdinalIgnoreCase).Count() > 1;
                 warnings.Add(different ? "相同 UUID 存在不同版本。" : "相同 UUID 和版本存在多个副本。");
             }
-            if (item.Category.Contains("资源") && !manifest.Modules.Contains("resources") ||
-                item.Category.Contains("行为") && !manifest.Modules.Contains("data"))
+            bool resource = manifest.Modules.Contains("resources"), behavior = manifest.Modules.Contains("data");
+            if (resource == behavior) warnings.Add("包类型不明确。");
+            else if (!MatchesCategory(item))
                 warnings.Add("包类型与所在目录不一致。");
             foreach (string dependency in manifest.Dependencies) {
                 string[] parts = dependency.Split(new[] { ' ' }, 2);
@@ -77,6 +78,12 @@ public static class BedrockAddonCatalog {
             item.Warnings = warnings;
         }
         return result;
+    }
+
+    internal static bool MatchesCategory(BedrockInstalledAddon addon) {
+        if (addon.Manifest is null) return false;
+        bool resource = addon.Manifest.Modules.Contains("resources"), behavior = addon.Manifest.Modules.Contains("data");
+        return resource != behavior && (resource && addon.Category.Contains("资源") || behavior && addon.Category.Contains("行为"));
     }
 
     private static void EnsureRootDirectory(string path) {

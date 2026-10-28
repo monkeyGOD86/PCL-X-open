@@ -19,7 +19,7 @@ public static class BedrockDependencyCheck {
         if (roots.Count is < 1 or > 128) throw new InvalidDataException("依赖检查目录数量无效。");
         if (planned.Count > 128) throw new InvalidDataException("待安装的包过多。");
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var installed = new List<BedrockPackInfo>();
+        var installed = new List<BedrockInstalledAddon>();
         var incomplete = new List<string>();
         foreach (var root in roots) {
             string path = Path.GetFullPath(root.Path).TrimEnd(Path.DirectorySeparatorChar);
@@ -27,7 +27,7 @@ public static class BedrockDependencyCheck {
             try {
                 var catalog = BedrockAddonCatalog.Read(root);
                 if (catalog.Any(item => item.Manifest is null)) incomplete.Add(path);
-                installed.AddRange(catalog.Where(item => item.Manifest is not null).Select(item => item.Manifest!));
+                installed.AddRange(catalog.Where(item => item.Manifest is not null));
             } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException or JsonException or DecoderFallbackException) {
                 incomplete.Add(path);
             }
@@ -39,12 +39,17 @@ public static class BedrockDependencyCheck {
                 results.Add(new(dependency, "平台模块：未验证"));
                 continue;
             }
-            var matches = installed.Where(item => item.Uuid == id).ToArray();
+            var matches = installed.Where(item => item.Manifest!.Uuid == id).ToArray();
             var pending = planned.Where(item => item.Uuid == id).ToArray();
-            bool installedMatch = matches.Any(item => parts.Length == 1 || item.Version == parts[1]);
+            var matchingInstalled = matches.Where(item => parts.Length == 1 || item.Manifest!.Version == parts[1]).ToArray();
+            bool installedMatch = matchingInstalled.Any(BedrockAddonCatalog.MatchesCategory);
+            bool categoryProblem = matchingInstalled.Any(item => !BedrockAddonCatalog.MatchesCategory(item));
             bool pendingMatch = pending.Any(item => parts.Length == 1 || item.Version == parts[1]);
-            if (installedMatch) results.Add(new(dependency, "已在所选目录发现；世界启用状态未检查"));
-            else if (pendingMatch) results.Add(new(dependency, "本次待安装；世界启用状态未检查"));
+            if (installedMatch) results.Add(new(dependency, "已在所选目录发现；" +
+                (categoryProblem ? "其他副本的类型或目录不符；" : "") + "世界启用状态未检查"));
+            else if (pendingMatch) results.Add(new(dependency, "本次待安装；" +
+                (categoryProblem ? "现有副本的类型或目录不符，仍需检查安装冲突；" : "") + "世界启用状态未检查"));
+            else if (categoryProblem) results.Add(new(dependency, "发现声明版本，但包类型不明确或与所在目录不符；游戏可用性未验证"));
             else if (matches.Length + pending.Length == 0) results.Add(new(dependency, incomplete.Count == 0 ? "所选目录未发现" : "无法确认：部分目录未读全"));
             else results.Add(new(dependency, incomplete.Count == 0 ? "未发现声明版本" : "无法确认声明版本：部分目录未读全"));
         }

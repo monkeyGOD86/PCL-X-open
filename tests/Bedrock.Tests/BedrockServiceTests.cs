@@ -63,6 +63,7 @@ public class BedrockServiceTests {
             packTests.RejectsAmbiguousInstalledPackLayouts,
             packTests.ChecksConflictsAcrossExplicitRootsAndReportsIncompleteScan,
             packTests.ChecksDependenciesAcrossRootsWithoutClaimingWorldActivation,
+            packTests.ReportsMisplacedAndAmbiguousDependencyPackages,
             packTests.TransactionRechecksCrossRootScopeBeforeCommit,
             packTests.LegacyTransactionCanBeRecoveredButNotCommitted,
             packTests.PreparesArchiveThenInstallsAndRecoversIt,

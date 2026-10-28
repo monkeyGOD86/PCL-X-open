@@ -664,6 +664,32 @@ public sealed class BedrockPackInspectorTests {
         } finally { TestPaths.DeleteFixture(fixture); }
     }
 
+    public void ReportsMisplacedAndAmbiguousDependencyPackages() {
+        string fixture = Path.Combine(Path.GetTempPath(), "pcl-dependency-category-test-" + Guid.NewGuid().ToString("N"));
+        string game = Path.Combine(fixture, "game"), misplaced = Path.Combine(game, "behavior_packs", "dep");
+        string correct = Path.Combine(game, "resource_packs", "dep");
+        Directory.CreateDirectory(misplaced);
+        try {
+            File.WriteAllText(Path.Combine(misplaced, "manifest.json"), Manifest);
+            var root = new BedrockDataRoot(game, "fixture");
+            var source = new BedrockPackInfo("source", "", Guid.NewGuid(), "1.0.0", ["data"],
+                ["11111111-1111-4111-8111-111111111111 1.2.3"], null);
+            string status = BedrockDependencyCheck.Analyze(source, [root]).Results.Single().Status;
+            Check(status.Contains("目录不符") && status.Contains("未验证"), "misplaced dependency was reported as available");
+            var planned = new BedrockPackInfo("dependency", "", Guid.Parse("11111111-1111-4111-8111-111111111111"), "1.2.3", ["resources"], [], null);
+            status = BedrockDependencyCheck.Analyze(source, [root], [planned]).Results.Single().Status;
+            Check(status.Contains("本次待安装") && status.Contains("冲突"), "conflicting installed copy was hidden by planned pack");
+            Directory.CreateDirectory(correct); File.WriteAllText(Path.Combine(correct, "manifest.json"), Manifest);
+            status = BedrockDependencyCheck.Analyze(source, [root]).Results.Single().Status;
+            Check(status.Contains("已在所选目录发现") && status.Contains("其他副本"), "misplaced duplicate was hidden");
+            string ambiguous = Manifest.Replace("\"modules\":[{\"type\":\"resources\"", "\"modules\":[{\"type\":\"data\",\"uuid\":\"33333333-3333-4333-8333-333333333333\",\"version\":[1,0,0]},{\"type\":\"resources\"");
+            File.WriteAllText(Path.Combine(correct, "manifest.json"), ambiguous);
+            Check(BedrockAddonCatalog.Read(root).Any(item => item.Warnings.Any(warning => warning.Contains("类型不明确"))), "ambiguous pack type warning missing");
+            status = BedrockDependencyCheck.Analyze(source, [root]).Results.Single().Status;
+            Check(status.Contains("类型不明确") && status.Contains("未验证"), "ambiguous dependency was reported as available");
+        } finally { TestPaths.DeleteFixture(fixture); }
+    }
+
     public void TransactionRechecksCrossRootScopeBeforeCommit() {
         string fixture = Path.Combine(Path.GetTempPath(), "pcl-bedrock-scope-transaction-test-" + Guid.NewGuid().ToString("N"));
         string account = Path.Combine(fixture, "account"), shared = Path.Combine(fixture, "shared"), source = Path.Combine(fixture, "source");
