@@ -11,9 +11,11 @@ Public Class PageBedrockRight
     Private Class WorldAddonChoice
         Public ReadOnly Root As BedrockDataRoot
         Public ReadOnly Addon As BedrockInstalledAddon
-        Public Sub New(Root As BedrockDataRoot, Addon As BedrockInstalledAddon)
+        Public ReadOnly IsWorldReference As Boolean
+        Public Sub New(Root As BedrockDataRoot, Addon As BedrockInstalledAddon, Optional IsWorldReference As Boolean = False)
             Me.Root = Root
             Me.Addon = Addon
+            Me.IsWorldReference = IsWorldReference
         End Sub
     End Class
 
@@ -479,15 +481,15 @@ Public Class PageBedrockRight
         Try
             Dim Result = Await Task.Run(Function()
                                             Dim Roots = ValidateInstallTarget(Installation, Root)
-                                            Return CollectWorldAddons(Roots)
+                                            Return CollectWorldAddons(Roots, Root, World)
                                         End Function)
             WorldAddonScanIncomplete = Result.IncompleteRoots.Count > 0
             For Each Choice In Result.Choices
                 Dim Pack = Choice.Addon.Manifest
-                ComboWorldAddons.Items.Add(New MyComboBoxItem With {.Content = Choice.Root.Source & " · " & Pack.Name & " · " & Pack.Version, .Tag = Choice})
+                ComboWorldAddons.Items.Add(New MyComboBoxItem With {.Content = If(Choice.IsWorldReference, "世界引用", Choice.Root.Source) & " · " & Pack.Name & " · " & Pack.Version, .Tag = Choice})
             Next
             LabWorldAddonStatus.Text = If(Result.Choices.Count = 0, "候选目录中没有可识别的附加包。", $"发现 {Result.Choices.Count} 个候选包；请选择后检查其使用范围。") &
-                                       If(Result.IncompleteRoots.Count = 0, "", vbCrLf & "部分目录无法完整读取；显示的列表不完整，写入前会拒绝无法完成的冲突检查。") &
+                                       If(Result.IncompleteRoots.Count = 0, "", vbCrLf & "部分目录无法完整读取；已安装包的配置修改已禁用，现有世界引用仍可在备份后停用。") &
                                        If(IsEligibleWorldTarget(Installation, Root, World), "", vbCrLf & "当前目标仅支持只读查看；世界配置写入尚未验证。")
         Catch ex As Exception
             LabWorldAddonStatus.Text = "读取候选附加包失败：" & ex.Message
@@ -497,7 +499,7 @@ Public Class PageBedrockRight
         End Try
     End Sub
 
-    Private Shared Function CollectWorldAddons(Roots As IReadOnlyList(Of BedrockDataRoot)) As WorldAddonList
+    Private Shared Function CollectWorldAddons(Roots As IReadOnlyList(Of BedrockDataRoot), WorldRoot As BedrockDataRoot, World As BedrockWorldInfo) As WorldAddonList
         Dim Choices As New List(Of WorldAddonChoice)
         Dim Incomplete As New List(Of String)
         For Each Root In Roots
@@ -519,8 +521,23 @@ Public Class PageBedrockRight
                 Choices.Add(New WorldAddonChoice(Root, Addon))
             Next
         Next
+        AddWorldReferences(Choices, WorldRoot, World, World.ResourcePacks, "resources")
+        AddWorldReferences(Choices, WorldRoot, World, World.BehaviorPacks, "data")
         Return New WorldAddonList(Choices, Incomplete)
     End Function
+
+    Private Shared Sub AddWorldReferences(Choices As List(Of WorldAddonChoice), WorldRoot As BedrockDataRoot, World As BedrockWorldInfo,
+                                          References As IReadOnlyList(Of String), ModuleType As String)
+        For Each Reference In References
+            Dim Parts = Reference.Split({" "c}, 2)
+            Dim Id As Guid
+            If Parts.Length <> 2 OrElse Not Guid.TryParse(Parts(0), Id) OrElse Id = Guid.Empty OrElse
+               Not System.Text.RegularExpressions.Regex.IsMatch(Parts(1), "^[0-9]+\.[0-9]+\.[0-9]+$") Then Continue For
+            If Choices.Count >= 4096 Then Throw New InvalidDataException("候选附加包过多。")
+            Dim Pack As New BedrockPackInfo("世界中的" & If(ModuleType = "resources", "资源包引用", "行为包引用"), "", Id, Parts(1), {ModuleType}, {}, Nothing)
+            Choices.Add(New WorldAddonChoice(WorldRoot, New BedrockInstalledAddon(World.Path, "世界引用", Pack, Nothing), True))
+        Next
+    End Sub
 
     Private Sub WorldAddonSelectionChanged(sender As Object, e As SelectionChangedEventArgs) Handles ComboWorldAddons.SelectionChanged
         Dim Choice = TryCast(TryCast(ComboWorldAddons.SelectedItem, MyComboBoxItem)?.Tag, WorldAddonChoice)
@@ -528,12 +545,12 @@ Public Class PageBedrockRight
             Dim Pack = Choice.Addon.Manifest
             LabWorldAddonStatus.Text = $"清单名称：{Pack.Name}（可能为本地化键）　版本：{Pack.Version}" & vbCrLf & $"UUID：{Pack.Uuid}　类型：{String.Join(", ", Pack.Modules)}" & vbCrLf &
                                        If(Pack.Modules.Contains("resources"), "资源包使用范围：" & Pack.PackScope & vbCrLf, "") &
-                                       "包目录：" & Choice.Addon.Path
+                                       If(Choice.IsWorldReference, "来源：当前世界配置；可停用该引用。", "包目录：" & Choice.Addon.Path)
             Dim Installation = TryCast(TryCast(ComboInstall.SelectedItem, MyComboBoxItem)?.Tag, BedrockInstallation)
             Dim Root = TryCast(TryCast(ComboRoots.SelectedItem, MyComboBoxItem)?.Tag, BedrockDataRoot)
             Dim World = TryCast(TryCast(ComboWorlds.SelectedItem, MyComboBoxItem)?.Tag, BedrockWorldInfo)
             If Not IsEligibleWorldTarget(Installation, Root, World) Then LabWorldAddonStatus.Text &= vbCrLf & "当前目标仅支持只读查看；世界配置写入尚未验证。"
-            If WorldAddonScanIncomplete Then LabWorldAddonStatus.Text &= vbCrLf & "部分目录无法完整读取，无法确认包冲突；配置修改已禁用。"
+            If WorldAddonScanIncomplete Then LabWorldAddonStatus.Text &= vbCrLf & "部分目录无法完整读取；已安装包的配置修改已禁用，现有世界引用仍可在备份后停用。"
         End If
         RefreshWorldAddonButtons()
     End Sub
@@ -551,7 +568,7 @@ Public Class PageBedrockRight
         Dim Root = TryCast(TryCast(ComboRoots.SelectedItem, MyComboBoxItem)?.Tag, BedrockDataRoot)
         Dim World = TryCast(TryCast(ComboWorlds.SelectedItem, MyComboBoxItem)?.Tag, BedrockWorldInfo)
         Dim Choice = TryCast(TryCast(ComboWorldAddons.SelectedItem, MyComboBoxItem)?.Tag, WorldAddonChoice)
-        If IsBusy OrElse Not IsEligibleWorldTarget(Installation, Root, World) OrElse Choice Is Nothing Then Return
+        If IsBusy OrElse Not IsEligibleWorldTarget(Installation, Root, World) OrElse Choice Is Nothing OrElse (Enable AndAlso Choice.IsWorldReference) Then Return
         If IsKnownBedrockProcessRunning() Then
             MyMsgBox("请先关闭 Minecraft 基岩版并等待同步完成。", "世界附加包配置")
             Return
@@ -561,16 +578,19 @@ Public Class PageBedrockRight
         Try
             LabWorldAddonStatus.Text = "正在检查世界、附加包和依赖…"
             Dim Roots = Await Task.Run(Function() ValidateInstallTarget(Installation, Root))
-            Dim Preview = Await Task.Run(Function() ValidateWorldAddon(Choice, Roots))
-            Dim Kind = If(Preview.Pack.Modules.Contains("resources"), "resource", "behavior")
-            If Enable AndAlso Kind = "resource" AndAlso Preview.Pack.PackScope <> "any" AndAlso Preview.Pack.PackScope <> "world" Then
+            Dim Preview As BedrockDirectoryPreview = Nothing
+            If Not Choice.IsWorldReference Then Preview = Await Task.Run(Function() ValidateWorldAddon(Choice, Roots))
+            Dim Pack = If(Choice.IsWorldReference, Choice.Addon.Manifest, Preview.Pack)
+            Dim Kind = If(Pack.Modules.Contains("resources"), "resource", "behavior")
+            If Enable AndAlso Kind = "resource" AndAlso Pack.PackScope <> "any" AndAlso Pack.PackScope <> "world" Then
                 Throw New InvalidOperationException("此资源包不能确认可用于世界。")
             End If
             Dim Snapshot = Await Task.Run(Function() BedrockWorldPackEditor.Read(Root, World, Kind))
-            Dim Report = Await Task.Run(Function() BedrockDependencyCheck.Analyze(Preview.Pack, Roots))
+            Dim Report = Await Task.Run(Function() BedrockDependencyCheck.Analyze(Pack, Roots))
             Dim DependencyLines = Report.Results.Select(Function(Item) Item.Dependency & "：" & Item.Status).ToArray()
             Dim DependencyText = If(DependencyLines.Length = 0, "无声明依赖。", String.Join(vbCrLf, DependencyLines.Take(12)) &
                                     If(DependencyLines.Length > 12, vbCrLf & $"另有 {DependencyLines.Length - 12} 项未显示。", ""))
+            If Choice.IsWorldReference Then DependencyText = "此条目仅来自世界配置，无法检查原包声明的依赖。"
             If Report.IncompleteRoots.Count > 0 Then DependencyText &= vbCrLf & "部分候选目录无法完整读取。"
             Using Dialog As New System.Windows.Forms.FolderBrowserDialog With {.Description = "选择游戏数据目录之外的世界及配置备份文件夹", .ShowNewFolderButton = True}
                 If Dialog.ShowDialog() <> System.Windows.Forms.DialogResult.OK Then
@@ -581,7 +601,8 @@ Public Class PageBedrockRight
                 If Roots.Any(Function(Item) IsWithinRoot(Item.Path, BackupParent)) Then Throw New InvalidOperationException("备份不能位于候选游戏数据目录内。")
                 If MyMsgBox("请确认游戏已关闭且同步完成。此功能尚未验证真实游戏对配置修改的处理。" & vbCrLf & vbCrLf &
                             "世界：" & World.Name & vbCrLf & "世界目录：" & World.Path & vbCrLf & "账户目录：" & Root.Path & vbCrLf &
-                            "附加包：" & Preview.Pack.Name & "　" & Preview.Pack.Version & vbCrLf & "UUID：" & Preview.Pack.Uuid.ToString() & vbCrLf &
+                            "附加包：" & Pack.Name & "　" & Pack.Version & vbCrLf & "UUID：" & Pack.Uuid.ToString() & vbCrLf &
+                            If(Choice.IsWorldReference, "此条目来自世界配置，包本身可能已不存在；只会停用引用。" & vbCrLf, "") &
                             "操作：" & If(Enable, "启用", "停用") & vbCrLf & "备份目录：" & BackupParent & vbCrLf &
                             "依赖检查（不代表世界已启用依赖）：" & vbCrLf & DependencyText & vbCrLf &
                             "将先创建并校验完整世界备份，再备份和修改配置；游戏及云同步可能仍影响结果。", "确认实验性世界配置", "继续", "取消") <> 1 Then
@@ -599,9 +620,12 @@ Public Class PageBedrockRight
                                                 If IsKnownBedrockProcessRunning() Then Throw New InvalidOperationException("Minecraft 正在运行，请关闭后重试。")
                                                 Dim CurrentRoots = ValidateInstallTarget(Installation, Root)
                                                 If Not SameRoots(Roots, CurrentRoots) Then Throw New InvalidOperationException("数据目录范围已变化，请重新确认。")
-                                                Dim CurrentPack = ValidateWorldAddon(Choice, CurrentRoots)
-                                                If CurrentPack.Fingerprint <> Preview.Fingerprint Then Throw New InvalidOperationException("附加包内容已变化，请重新确认。")
-                                                Return BedrockWorldPackEditor.SetEnabled(Root, World, Snapshot, CurrentPack.Pack, Enable, BackupParent)
+                                                If Not Choice.IsWorldReference Then
+                                                    Dim CurrentPack = ValidateWorldAddon(Choice, CurrentRoots)
+                                                    If CurrentPack.Fingerprint <> Preview.Fingerprint Then Throw New InvalidOperationException("附加包内容已变化，请重新确认。")
+                                                    Pack = CurrentPack.Pack
+                                                End If
+                                                Return BedrockWorldPackEditor.SetEnabled(Root, World, Snapshot, Pack, Enable, BackupParent)
                                             End Function)
                 LabWorldAddonStatus.Text = If(Change.BackupPath Is Nothing, "配置没有变化。", "配置已写入；游戏是否识别需自行确认。") &
                                            vbCrLf & "世界备份：" & FullBackup & If(Change.BackupPath Is Nothing, "", vbCrLf & "配置备份：" & Change.BackupPath) &
@@ -689,8 +713,8 @@ Public Class PageBedrockRight
         BtnReadWorldAddons.IsEnabled = CanRead
         BtnRestoreWorldConfig.IsEnabled = CanWrite
         ComboWorldAddons.IsEnabled = CanRead AndAlso ComboWorldAddons.Items.Count > 0
-        BtnWorldEnableAddon.IsEnabled = CanWrite AndAlso Not WorldAddonScanIncomplete AndAlso Choice IsNot Nothing
-        BtnWorldDisableAddon.IsEnabled = CanWrite AndAlso Not WorldAddonScanIncomplete AndAlso Choice IsNot Nothing
+        BtnWorldEnableAddon.IsEnabled = CanWrite AndAlso Not WorldAddonScanIncomplete AndAlso Choice IsNot Nothing AndAlso Not Choice.IsWorldReference
+        BtnWorldDisableAddon.IsEnabled = CanWrite AndAlso Choice IsNot Nothing AndAlso (Choice.IsWorldReference OrElse Not WorldAddonScanIncomplete)
     End Sub
 
     Private Async Sub BackupClicked(sender As Object, e As EventArgs) Handles BtnBackup.Click

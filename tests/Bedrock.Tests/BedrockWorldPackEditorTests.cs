@@ -53,6 +53,7 @@ public sealed class BedrockWorldPackEditorTests {
         string original = "[{\"pack_id\":\"11111111-1111-4111-8111-111111111111\",\"version\":[1,2,3]}," +
             "{\"pack_id\":\"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa\",\"version\":[1,0,0],\"extra\":42}]";
         File.WriteAllText(config, original);
+        Check(!Directory.Exists(Path.Combine(root.Path, "resource_packs")), "orphan-reference fixture unexpectedly has installed packs");
         var snapshot = BedrockWorldPackEditor.Read(root, world, "resource");
         var change = BedrockWorldPackEditor.SetEnabled(root, world, snapshot, Pack, false, backup);
         string updated = File.ReadAllText(config);
