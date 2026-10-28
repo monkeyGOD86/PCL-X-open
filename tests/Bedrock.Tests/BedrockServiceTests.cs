@@ -30,6 +30,7 @@ public class BedrockServiceTests {
             worldTests.RefusesToOverwriteExistingBackup,
             worldTests.RestoresAsNewWithoutOverwritingOriginal,
             worldTests.RejectsCorruptRestoreBeforeCreatingWorld,
+            worldTests.RejectsBackupEntryCaseMismatchBeforeRestoring,
             worldTests.RejectsWindowsDeviceNamesInBackups,
             worldTests.PreservesStagedFilesWhenRestoreFails,
             worldTests.RejectsSharedRootForWorldOperations,

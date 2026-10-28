@@ -167,6 +167,31 @@ public sealed class BedrockWorldReaderTests {
         } finally { File.Delete(backup); }
     });
 
+    public void RejectsBackupEntryCaseMismatchBeforeRestoring() => WithWorld((temp, root, world) => {
+        string backup = Path.Combine(temp, "backup.zip");
+        File.WriteAllText(Path.Combine(world, "level.dat"), "fixture");
+        try {
+            var dataRoot = new BedrockDataRoot(root, "fixture");
+            BedrockWorldBackup.Create(dataRoot, new BedrockWorldInfo(world, "Test", true, [], [], null), backup);
+            using (var file = new FileStream(backup, FileMode.Open, FileAccess.ReadWrite))
+            using (var archive = new ZipArchive(file, ZipArchiveMode.Update)) {
+                var original = archive.GetEntry("world/level.dat")!;
+                byte[] bytes;
+                using (var input = original.Open())
+                using (var copy = new MemoryStream()) { input.CopyTo(copy); bytes = copy.ToArray(); }
+                original.Delete();
+                using var replacement = archive.CreateEntry("world/LEVEL.DAT").Open();
+                replacement.Write(bytes, 0, bytes.Length);
+            }
+            try { BedrockWorldBackup.Verify(backup); throw new Exception("mismatched entry passed verification"); }
+            catch (InvalidDataException) { }
+            try { BedrockWorldBackup.RestoreAsNew(dataRoot, backup); throw new Exception("mismatched entry was restored"); }
+            catch (InvalidDataException) { }
+            Check(Directory.GetDirectories(root, ".pcl-restore-*").Length == 0 &&
+                File.ReadAllText(Path.Combine(world, "level.dat")) == "fixture", "invalid backup changed world or created staging");
+        } finally { File.Delete(backup); }
+    });
+
     public void RejectsWindowsDeviceNamesInBackups() => WithWorld((temp, _, _) => {
         string backup = Path.Combine(temp, "backup.zip");
         try {

@@ -201,7 +201,8 @@ public static class BedrockWorldBackup {
             string hash = item.Value<string>("sha256") ?? "";
             if (size < 0 || size > MaxBytes - total || hash.Length != 64 || !visited.Add(path.Normalize(NormalizationForm.FormC)) ||
                 directoryNames.Contains(path.Normalize(NormalizationForm.FormC)) ||
-                !byName.TryGetValue("world/" + path, out var entry) || entry.Length != size)
+                !byName.TryGetValue("world/" + path, out var entry) ||
+                !string.Equals(entry.FullName, "world/" + path, StringComparison.Ordinal) || entry.Length != size)
                 throw new InvalidDataException("备份清单与内容不一致。");
             if (size > 1024 * 1024 && (entry.CompressedLength == 0 || size / Math.Max(entry.CompressedLength, 1) > 200))
                 throw new InvalidDataException("备份文件压缩比异常。");
