@@ -138,11 +138,16 @@ public static class BedrockAddonTransaction {
         using var rootLock = BedrockRootLock.Acquire(rootPath);
         var (path, id, records, _) = ReadJournal(rootPath, transaction);
         var toMove = new List<(string From, string To, JObject Record)>();
+        int missing = 0;
         for (int i = 0; i < records.Count; i++) {
             var record = (JObject)records[i];
             string stage = Stage(path, i), destination = Destination(rootPath, id, i, record);
             if (File.Exists(stage) || File.Exists(destination)) throw new IOException("事务路径被其他文件占用。");
-            if (!Directory.Exists(destination)) continue;
+            if (!Directory.Exists(destination)) {
+                if (Directory.Exists(stage)) Verify(stage, record);
+                else missing++;
+                continue;
+            }
             if (Directory.Exists(stage)) throw new IOException("暂存和安装目录同时存在，不能自动恢复。");
             Verify(destination, record);
             toMove.Add((destination, stage, record));
@@ -158,6 +163,7 @@ public static class BedrockAddonTransaction {
         } catch (Exception ex) {
             throw new IOException("恢复未完成，请保留事务目录并再次检查：" + path, ex);
         }
+        if (missing > 0) throw new IOException($"已恢复可移动的包，但有 {missing} 个包的安装和暂存目录均缺失；请检查事务：" + path);
     }
 
     private static (string Path, string Id, JArray Records, string[]? Scope) ReadJournal(string rootPath, string transaction) {

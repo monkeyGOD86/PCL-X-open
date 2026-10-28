@@ -320,6 +320,33 @@ public sealed class BedrockPackInspectorTests {
         } finally { TestPaths.DeleteFixture(fixture); }
     }
 
+    public void ReportsMissingAndChangedMembersDuringRollback() {
+        string fixture = Path.Combine(Path.GetTempPath(), "pcl-bedrock-recovery-test-" + Guid.NewGuid().ToString("N"));
+        string game = Path.Combine(fixture, "game"), category = Path.Combine(game, "resource_packs");
+        string first = Path.Combine(fixture, "first"), second = Path.Combine(fixture, "second"), held = Path.Combine(fixture, "held");
+        Directory.CreateDirectory(category); Directory.CreateDirectory(first); Directory.CreateDirectory(second);
+        try {
+            File.WriteAllText(Path.Combine(first, "manifest.json"), Manifest);
+            File.WriteAllText(Path.Combine(second, "manifest.json"), Manifest.Replace("11111111-1111-4111-8111-111111111111", "33333333-3333-4333-8333-333333333333"));
+            var root = new BedrockDataRoot(game, "fixture");
+            string transaction = BedrockAddonTransaction.Prepare(root, [new BedrockPreparedPack(first, BedrockDirectoryInstaller.Preview(first)),
+                new BedrockPreparedPack(second, BedrockDirectoryInstaller.Preview(second))], [root]);
+            string id = Path.GetFileName(transaction).Substring(".pcl-addon-transaction-".Length);
+            string installed = Path.Combine(category, "pcl-" + id + "-0");
+            Directory.Move(Path.Combine(transaction, "pack-0"), installed);
+            Directory.Move(Path.Combine(transaction, "pack-1"), held);
+            try { BedrockAddonTransaction.Rollback(root, transaction); throw new Exception("missing member reported as success"); }
+            catch (IOException ex) { Check(ex.Message.Contains("缺失"), "missing member not explained"); }
+            Check(!Directory.Exists(installed) && Directory.Exists(Path.Combine(transaction, "pack-0")) && Directory.Exists(held),
+                "recoverable member or held content was lost");
+            Directory.Move(held, Path.Combine(transaction, "pack-1"));
+            File.WriteAllText(Path.Combine(transaction, "pack-1", "changed.txt"), "change");
+            try { BedrockAddonTransaction.Rollback(root, transaction); throw new Exception("changed stage reported as success"); }
+            catch (InvalidDataException) { }
+            Check(File.Exists(Path.Combine(transaction, "pack-1", "changed.txt")), "changed stage was lost");
+        } finally { TestPaths.DeleteFixture(fixture); }
+    }
+
     public void RejectsTamperedTransactionJournal() {
         string fixture = Path.Combine(Path.GetTempPath(), "pcl-bedrock-transaction-test-" + Guid.NewGuid().ToString("N"));
         string game = Path.Combine(fixture, "game"), category = Path.Combine(game, "resource_packs"), source = Path.Combine(fixture, "source");

@@ -45,6 +45,7 @@ public class BedrockServiceTests {
             packTests.RejectsAddonWithAmbiguousFiles,
             packTests.CommitsAndRollsBackMultiPackTransaction,
             packTests.RecoversInterruptedTransactionAndRefusesChangedContent,
+            packTests.ReportsMissingAndChangedMembersDuringRollback,
             packTests.RejectsTamperedTransactionJournal,
             packTests.RemovesAndRestoresVersionedPackWithExternalBackup,
             packTests.RefusesRestorationOverExistingOrModifiedPack,
