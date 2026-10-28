@@ -901,6 +901,59 @@ public sealed class BedrockPackInspectorTests {
         } finally { TestPaths.DeleteFixture(fixture); }
     }
 
+    public void ImportsInstallsRemovesAndRestoresPackArchives() {
+        foreach (bool addon in new[] { false, true }) {
+            string fixture = Path.Combine(Path.GetTempPath(), "pcl-bedrock-mvp-test-" + Guid.NewGuid().ToString("N"));
+            string sharedPath = Path.Combine(fixture, "shared"), accountPath = Path.Combine(fixture, "account"), backups = Path.Combine(fixture, "backups");
+            Directory.CreateDirectory(Path.Combine(sharedPath, "resource_packs"));
+            Directory.CreateDirectory(Path.Combine(sharedPath, "behavior_packs"));
+            Directory.CreateDirectory(Path.Combine(accountPath, "minecraftWorlds"));
+            Directory.CreateDirectory(backups);
+            try {
+                string sentinel = Path.Combine(accountPath, "existing-user-data.txt");
+                File.WriteAllText(sentinel, "unchanged");
+                string archive = Path.Combine(fixture, addon ? "sample.mcaddon" : "sample.mcpack");
+                using (var file = File.Create(archive))
+                using (var zip = new ZipArchive(file, ZipArchiveMode.Create)) {
+                    string resourcePrefix = addon ? "resource/" : "";
+                    Add(zip, resourcePrefix + "manifest.json", Manifest);
+                    Add(zip, resourcePrefix + "textures/content.txt", "resource payload");
+                    if (addon) {
+                        string behavior = Manifest.Replace("11111111-1111-4111-8111-111111111111", "33333333-3333-4333-8333-333333333333")
+                            .Replace("\"type\":\"resources\"", "\"type\":\"data\"");
+                        Add(zip, "behavior/manifest.json", behavior);
+                        Add(zip, "behavior/functions/content.txt", "behavior payload");
+                    }
+                }
+                var shared = new BedrockDataRoot(sharedPath, "shared", false, BedrockDataRootKind.GdkShared);
+                var account = new BedrockDataRoot(accountPath, "account", true, BedrockDataRootKind.GdkAccountCandidate);
+                BedrockDataRoot[] scope = [shared, account];
+                var preview = BedrockPackInspector.Inspect(archive);
+                IReadOnlyList<BedrockPreparedPack> prepared = addon
+                    ? BedrockArchivePreparer.PrepareMcaddon(archive, fixture, scope).Packs
+                    : [BedrockArchivePreparer.PrepareMcpack(archive, fixture, scope)];
+                Check(preview.Count == (addon ? 2 : 1) && prepared.Count == preview.Count, "archive preview or preparation lost a pack");
+                string transaction = BedrockAddonTransaction.Prepare(shared, prepared, scope);
+                BedrockAddonTransaction.Commit(shared, transaction, scope);
+                var installed = BedrockAddonCatalog.Read(shared).ToArray();
+                Check(installed.Length == preview.Count && installed.All(item => item.Manifest is not null), "installed packs were not listed");
+                var removals = new List<(string Original, BedrockRemovedAddon Removal)>();
+                foreach (var item in installed) {
+                    var removal = BedrockAddonRemoval.Remove(shared, item, BedrockDirectoryInstaller.Preview(item.Path), backups, [account], scope);
+                    Check(!Directory.Exists(item.Path) && File.Exists(Path.Combine(removal.BackupPath, "manifest.json")), "removal did not preserve a backup");
+                    removals.Add((item.Path, removal));
+                }
+                Check(BedrockAddonCatalog.Read(shared).Count == 0, "removed packs remain listed");
+                foreach (var (original, removal) in removals) {
+                    Check(BedrockAddonRemoval.Restore(shared, removal.TransactionPath, scope) == original && Directory.Exists(removal.BackupPath), "restore failed or removed external backup");
+                }
+                Check(BedrockAddonCatalog.Read(shared).Count == preview.Count, "restored packs were not listed");
+                BedrockAddonTransaction.Rollback(shared, transaction);
+                Check(BedrockAddonCatalog.Read(shared).Count == 0 && File.ReadAllText(sentinel) == "unchanged", "recovery changed unrelated data");
+            } finally { TestPaths.DeleteFixture(fixture); }
+        }
+    }
+
     private static void Add(ZipArchive zip, string name, string text) {
         using var writer = new StreamWriter(zip.CreateEntry(name).Open(), new UTF8Encoding(false));
         writer.Write(text);

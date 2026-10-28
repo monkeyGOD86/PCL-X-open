@@ -70,6 +70,7 @@ public class BedrockServiceTests {
             packTests.TransactionRechecksCrossRootScopeBeforeCommit,
             packTests.LegacyTransactionCanBeRecoveredButNotCommitted,
             packTests.PreparesArchiveThenInstallsAndRecoversIt,
+            packTests.ImportsInstallsRemovesAndRestoresPackArchives,
             worldPackTests.UpdatesAndRestoresWorldConfigWithoutDiscardingFields,
             worldPackTests.CreatesAndRevertsMissingConfigWithoutDeletingIt,
             worldPackTests.RejectsStaleSnapshotAndConflictingVersion,
