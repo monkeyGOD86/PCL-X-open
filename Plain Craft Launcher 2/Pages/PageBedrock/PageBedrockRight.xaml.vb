@@ -619,7 +619,7 @@ Public Class PageBedrockRight
                 LabWorldAddonStatus.Text = "正在备份并校验整个世界…"
                 Await Task.Run(Sub()
                                    If IsKnownBedrockProcessRunning() Then Throw New InvalidOperationException("Minecraft 正在运行，请关闭后重试。")
-                                   BedrockWorldBackup.Create(Root, World, FullBackup)
+                                   BedrockWorldBackup.Create(Root, World, FullBackup, Roots)
                                End Sub)
                 LabWorldAddonStatus.Text = "世界备份已创建，正在再次检查并修改配置…"
                 Dim Change = Await Task.Run(Function()
@@ -685,7 +685,7 @@ Public Class PageBedrockRight
             LabWorldAddonStatus.Text = "正在备份并校验整个世界…"
             Await Task.Run(Sub()
                                If IsKnownBedrockProcessRunning() Then Throw New InvalidOperationException("Minecraft 正在运行，请关闭后重试。")
-                               BedrockWorldBackup.Create(Root, World, FullBackup)
+                               BedrockWorldBackup.Create(Root, World, FullBackup, Roots)
                            End Sub)
             LabWorldAddonStatus.Text = "世界备份已创建，正在校验并恢复配置…"
             Dim Preserved = Await Task.Run(Function()
@@ -724,11 +724,12 @@ Public Class PageBedrockRight
     End Sub
 
     Private Async Sub BackupClicked(sender As Object, e As EventArgs) Handles BtnBackup.Click
+        Dim Installation = TryCast(TryCast(ComboInstall.SelectedItem, MyComboBoxItem)?.Tag, BedrockInstallation)
         Dim RootItem = TryCast(ComboRoots.SelectedItem, MyComboBoxItem)
         Dim WorldItem = TryCast(ComboWorlds.SelectedItem, MyComboBoxItem)
         Dim Root = TryCast(RootItem?.Tag, BedrockDataRoot)
         Dim World = TryCast(WorldItem?.Tag, BedrockWorldInfo)
-        If IsBusy OrElse Root Is Nothing OrElse World Is Nothing Then Return
+        If IsBusy OrElse Installation Is Nothing OrElse Root Is Nothing OrElse World Is Nothing Then Return
         If IsKnownBedrockProcessRunning() Then
             MyMsgBox("请先关闭 Minecraft 基岩版，再备份世界，以避免备份进行时游戏修改文件。", "世界备份")
             Return
@@ -749,7 +750,8 @@ Public Class PageBedrockRight
         Try
             Dim Info = Await Task.Run(Function()
                                           If IsKnownBedrockProcessRunning() Then Throw New InvalidOperationException("Minecraft 正在运行，请关闭后重试。")
-                                          Return BedrockWorldBackup.Create(Root, World, BackupPath)
+                                          Dim Roots = ValidateInstallTarget(Installation, Root)
+                                          Return BedrockWorldBackup.Create(Root, World, BackupPath, Roots)
                                       End Function)
             LabWorldStatus.Text = $"备份已创建并校验：{Info.Files} 个文件。"
         Catch ex As Exception

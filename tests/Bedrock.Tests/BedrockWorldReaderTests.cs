@@ -105,6 +105,28 @@ public sealed class BedrockWorldReaderTests {
         throw new Exception("backup inside game data was accepted");
     });
 
+    public void RejectsBackupInsideOtherProtectedGameRoot() {
+        string fixture = Path.Combine(Path.GetTempPath(), "pcl-world-roots-test-" + Guid.NewGuid().ToString("N"));
+        string game = Path.Combine(fixture, "game"), world = Path.Combine(game, "minecraftWorlds", "world");
+        string other = Path.Combine(fixture, "other"), sibling = Path.Combine(fixture, "other-sibling");
+        Directory.CreateDirectory(world); Directory.CreateDirectory(other); Directory.CreateDirectory(sibling);
+        try {
+            File.WriteAllText(Path.Combine(world, "level.dat"), "fixture");
+            var root = new BedrockDataRoot(game, "account");
+            var otherRoot = new BedrockDataRoot(other, "other account");
+            var info = new BedrockWorldInfo(world, "fixture", true, [], [], null);
+            string unsafeBackup = Path.Combine(other, "backup.zip");
+            try { BedrockWorldBackup.Create(root, info, unsafeBackup, [root, otherRoot]); throw new Exception("other game root accepted"); }
+            catch (InvalidDataException) { }
+            try { BedrockWorldBackup.Create(root, info, Path.Combine(sibling, "backup.zip"), [otherRoot]); throw new Exception("scope without selected root accepted"); }
+            catch (InvalidDataException) { }
+            Check(!Directory.EnumerateFileSystemEntries(other).Any(), "rejected backup created files in other game root");
+            string safeBackup = Path.Combine(sibling, "backup.zip");
+            BedrockWorldBackup.Create(root, info, safeBackup, [root, otherRoot]);
+            Check(File.Exists(safeBackup) && File.ReadAllText(Path.Combine(world, "level.dat")) == "fixture", "sibling backup failed or modified source");
+        } finally { TestPaths.DeleteFixture(fixture); }
+    }
+
     public void RefusesToOverwriteExistingBackup() => WithWorld((temp, root, world) => {
         File.WriteAllText(Path.Combine(world, "level.dat"), "fixture");
         string backup = Path.Combine(temp, "backup.zip");

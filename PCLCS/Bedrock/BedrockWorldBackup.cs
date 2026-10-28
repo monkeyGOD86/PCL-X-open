@@ -17,9 +17,16 @@ public static class BedrockWorldBackup {
     private const string ManifestName = "_pcl_backup/manifest.json";
 
     public static BedrockBackupInfo Create(BedrockDataRoot root, BedrockWorldInfo world, string destination) =>
-        Create(root, world, destination, null);
+        Create(root, world, destination, [root], null);
 
-    internal static BedrockBackupInfo Create(BedrockDataRoot root, BedrockWorldInfo world, string destination, Action? beforeSourceVerification) {
+    public static BedrockBackupInfo Create(BedrockDataRoot root, BedrockWorldInfo world, string destination,
+        IReadOnlyList<BedrockDataRoot> protectedRoots) => Create(root, world, destination, protectedRoots, null);
+
+    internal static BedrockBackupInfo Create(BedrockDataRoot root, BedrockWorldInfo world, string destination, Action? beforeSourceVerification) =>
+        Create(root, world, destination, [root], beforeSourceVerification);
+
+    private static BedrockBackupInfo Create(BedrockDataRoot root, BedrockWorldInfo world, string destination,
+        IReadOnlyList<BedrockDataRoot> protectedRoots, Action? beforeSourceVerification) {
         if (!root.SupportsWorlds) throw new InvalidDataException("共享内容目录不是用户世界目录。");
         string worldRoot = Path.GetFullPath(Path.Combine(root.Path, "minecraftWorlds"));
         string worldPath = Path.GetFullPath(world.Path).TrimEnd(Path.DirectorySeparatorChar);
@@ -29,8 +36,14 @@ public static class BedrockWorldBackup {
         if (!File.Exists(Path.Combine(worldPath, "level.dat"))) throw new InvalidDataException("世界缺少 level.dat。");
         string output = Path.GetFullPath(destination);
         if (!output.EndsWith(".zip", StringComparison.OrdinalIgnoreCase)) throw new InvalidDataException("备份文件必须使用 .zip 扩展名。");
-        string rootPath = Path.GetFullPath(root.Path).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
-        if (output.StartsWith(rootPath, StringComparison.OrdinalIgnoreCase))
+        if (protectedRoots.Count is < 1 or > 129) throw new InvalidDataException("备份保护目录范围无效。");
+        string selectedRoot = Path.GetFullPath(root.Path).TrimEnd(Path.DirectorySeparatorChar);
+        string[] roots = protectedRoots.Select(item => Path.GetFullPath(item.Path).TrimEnd(Path.DirectorySeparatorChar)).ToArray();
+        if (roots.Distinct(StringComparer.OrdinalIgnoreCase).Count() != roots.Length || !roots.Contains(selectedRoot, StringComparer.OrdinalIgnoreCase))
+            throw new InvalidDataException("备份保护目录必须包含所选目录且不能重复。");
+        foreach (string protectedRoot in roots) BedrockDataRootFinder.EnsureNoReparsePoints(protectedRoot);
+        if (roots.Any(protectedRoot => string.Equals(output, protectedRoot, StringComparison.OrdinalIgnoreCase) ||
+                output.StartsWith(protectedRoot + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)))
             throw new InvalidDataException("备份必须保存在游戏数据目录之外。");
         string parent = Path.GetDirectoryName(output) ?? throw new InvalidDataException("备份目录无效。");
         BedrockDataRootFinder.EnsureNoReparsePoints(parent);
