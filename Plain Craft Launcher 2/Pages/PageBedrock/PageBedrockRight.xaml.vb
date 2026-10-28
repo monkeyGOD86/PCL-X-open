@@ -336,6 +336,11 @@ Public Class PageBedrockRight
             Dim Usage = Await Task.Run(Function() BedrockWorldPackUsage.Check(WorldRoots, Preview.Pack.Uuid))
             If Not Usage.Complete Then Throw New InvalidOperationException("部分世界无法完整检查，不能安全移除。")
             If Usage.References.Count > 0 Then Throw New InvalidOperationException("有世界仍引用此资源包，请先检查世界配置。")
+            Dim GlobalRoots = WorldRoots.Concat({Root}).GroupBy(Function(Item) Path.GetFullPath(Item.Path).TrimEnd(Path.DirectorySeparatorChar), StringComparer.OrdinalIgnoreCase).
+                Select(Function(Group) Group.First()).ToArray()
+            Dim GlobalUsage = Await Task.Run(Function() BedrockGlobalPackUsage.Check(GlobalRoots, Preview.Pack.Uuid))
+            If GlobalUsage.IncompletePaths.Count > 0 Then Throw New InvalidOperationException("候选全局资源配置无法完整检查，不能安全移除。")
+            If GlobalUsage.References.Count > 0 Then Throw New InvalidOperationException("候选全局资源配置仍引用此资源包，请先检查游戏设置。")
             Using Dialog As New System.Windows.Forms.FolderBrowserDialog With {.Description = "选择游戏数据目录之外的备份文件夹", .ShowNewFolderButton = True}
                 If Dialog.ShowDialog() <> System.Windows.Forms.DialogResult.OK Then
                     LabAddonStatus.Text = "已取消移除。"
@@ -349,7 +354,7 @@ Public Class PageBedrockRight
                             "原目录：" & Addon.Path & vbCrLf & "备份目录：" & Backup & vbCrLf &
                             "已检查世界目录：" & vbCrLf & String.Join(vbCrLf, WorldRoots.Select(Function(Item) Item.Path)) & vbCrLf &
                             If(Skipped.Length > 0, "未检查的候选世界目录：" & vbCrLf & String.Join(vbCrLf, Skipped.Select(Function(Item) Item.Path)) & vbCrLf, "") &
-                            "全局资源引用、云端和未列出的账户无法检查；移除可能影响这些引用。将先创建外部备份，再移入可恢复的隔离目录。", "确认实验性移除", "移除", "取消") <> 1 Then
+                            "已检查上述世界目录及目标目录中 minecraftpe 下的候选全局配置；其他全局资源引用、云端和未列出的账户仍无法检查。将先创建外部备份，再移入可恢复的隔离目录。", "确认实验性移除", "移除", "取消") <> 1 Then
                     LabAddonStatus.Text = "已取消移除。"
                     Return
                 End If

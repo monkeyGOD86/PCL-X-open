@@ -48,6 +48,7 @@ public class BedrockServiceTests {
             packTests.RefusesRestorationOverExistingOrModifiedPack,
             packTests.RejectsChangedRemovalAndTamperedRemovalJournal,
             packTests.RefusesRemovalWhenAccountWorldReferencesSharedPack,
+            packTests.RefusesRemovalForCandidateGlobalReferencesAndInvalidConfig,
             packTests.ChecksConflictsAcrossExplicitRootsAndReportsIncompleteScan,
             packTests.ChecksDependenciesAcrossRootsWithoutClaimingWorldActivation,
             packTests.TransactionRechecksCrossRootScopeBeforeCommit,

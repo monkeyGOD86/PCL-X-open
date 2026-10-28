@@ -385,6 +385,38 @@ public sealed class BedrockPackInspectorTests {
         } finally { TestPaths.DeleteFixture(fixture); }
     }
 
+    public void RefusesRemovalForCandidateGlobalReferencesAndInvalidConfig() {
+        string fixture = Path.Combine(Path.GetTempPath(), "pcl-bedrock-global-usage-test-" + Guid.NewGuid().ToString("N"));
+        string shared = Path.Combine(fixture, "shared"), account = Path.Combine(fixture, "account"), backup = Path.Combine(fixture, "backup");
+        string pack = Path.Combine(shared, "resource_packs", "package"), global = Path.Combine(account, "minecraftpe", "global_resource_packs.json");
+        Directory.CreateDirectory(pack); Directory.CreateDirectory(Path.GetDirectoryName(global)!);
+        Directory.CreateDirectory(Path.Combine(account, "minecraftWorlds")); Directory.CreateDirectory(backup);
+        try {
+            File.WriteAllText(Path.Combine(pack, "manifest.json"), Manifest);
+            var target = new BedrockDataRoot(shared, "shared", false);
+            var worldRoot = new BedrockDataRoot(account, "account");
+            Guid uuid = Guid.Parse("11111111-1111-4111-8111-111111111111");
+            File.WriteAllText(global, "[{\"pack_id\":\"11111111-1111-4111-8111-111111111111\",\"version\":[1,2,3]}]");
+            var usage = BedrockGlobalPackUsage.Check([target, worldRoot], uuid);
+            Check(usage.References.Single() == global && usage.IncompletePaths.Count == 0, "candidate global reference missing");
+            try {
+                BedrockAddonRemoval.Remove(target, BedrockAddonCatalog.Read(target).Single(), BedrockDirectoryInstaller.Preview(pack), backup, [worldRoot]);
+                throw new Exception("globally referenced pack was removed");
+            } catch (InvalidDataException) { }
+            File.WriteAllText(global, "[{\"pack_id\":\"bad\"}]");
+            usage = BedrockGlobalPackUsage.Check([target, worldRoot], uuid);
+            Check(usage.IncompletePaths.Single() == global, "invalid global configuration treated as checked");
+            try {
+                BedrockAddonRemoval.Remove(target, BedrockAddonCatalog.Read(target).Single(), BedrockDirectoryInstaller.Preview(pack), backup, [worldRoot]);
+                throw new Exception("invalid global configuration accepted");
+            } catch (InvalidDataException) { }
+            Check(Directory.Exists(pack) && !Directory.EnumerateFileSystemEntries(backup).Any(), "failed global check changed data");
+            File.WriteAllText(global, "[{\"pack_id\":\"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa\",\"version\":[1,0,0]}]");
+            usage = BedrockGlobalPackUsage.Check([target, worldRoot], uuid);
+            Check(usage.References.Count == 0 && usage.IncompletePaths.Count == 0, "unrelated global pack reported as a match");
+        } finally { TestPaths.DeleteFixture(fixture); }
+    }
+
     public void ChecksConflictsAcrossExplicitRootsAndReportsIncompleteScan() {
         string fixture = Path.Combine(Path.GetTempPath(), "pcl-bedrock-scope-test-" + Guid.NewGuid().ToString("N"));
         string account = Path.Combine(fixture, "account"), shared = Path.Combine(fixture, "shared");
