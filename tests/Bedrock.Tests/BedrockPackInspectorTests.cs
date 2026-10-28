@@ -389,13 +389,23 @@ public sealed class BedrockPackInspectorTests {
         string fixture = Path.Combine(Path.GetTempPath(), "pcl-bedrock-behavior-remove-test-" + Guid.NewGuid().ToString("N"));
         string game = Path.Combine(fixture, "game"), backup = Path.Combine(fixture, "backup");
         string pack = Path.Combine(game, "behavior_packs", "package");
-        Directory.CreateDirectory(pack); Directory.CreateDirectory(backup); Directory.CreateDirectory(Path.Combine(game, "minecraftWorlds"));
+        string world = Path.Combine(game, "minecraftWorlds", "world");
+        Directory.CreateDirectory(pack); Directory.CreateDirectory(backup); Directory.CreateDirectory(world);
         try {
             File.WriteAllText(Path.Combine(pack, "manifest.json"), Manifest.Replace("\"type\":\"resources\"", "\"type\":\"data\""));
             File.WriteAllText(Path.Combine(pack, "payload.txt"), "behavior fixture");
             var root = new BedrockDataRoot(game, "fixture");
             var selected = BedrockAddonCatalog.Read(root).Single();
             Check(selected.Category == "行为包" && selected.Manifest!.Modules.Contains("data"), "behavior pack not identified");
+            File.WriteAllText(Path.Combine(world, "level.dat"), "world fixture");
+            string references = Path.Combine(world, "world_behavior_packs.json");
+            File.WriteAllText(references, "[{\"pack_id\":\"11111111-1111-4111-8111-111111111111\",\"version\":[1,2,3]}]");
+            try {
+                BedrockAddonRemoval.Remove(root, selected, BedrockDirectoryInstaller.Preview(pack), backup, [root], [root]);
+                throw new Exception("world-referenced behavior pack was removed");
+            } catch (InvalidDataException) { }
+            Check(Directory.Exists(pack) && !Directory.EnumerateFileSystemEntries(backup).Any(), "rejected behavior removal changed data");
+            File.WriteAllText(references, "[]");
             var removal = BedrockAddonRemoval.Remove(root, selected, BedrockDirectoryInstaller.Preview(pack), backup, [root], [root]);
             Check(!Directory.Exists(pack) && File.ReadAllText(Path.Combine(removal.BackupPath, "payload.txt")) == "behavior fixture", "behavior backup or quarantine missing");
             BedrockAddonRemoval.Restore(root, removal.TransactionPath, [root]);
