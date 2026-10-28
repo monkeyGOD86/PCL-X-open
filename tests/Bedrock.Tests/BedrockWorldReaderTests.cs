@@ -16,6 +16,30 @@ public sealed class BedrockWorldReaderTests {
         Check(item.ResourcePacks.Single().EndsWith("1.2.3"), "world pack reference missing");
     });
 
+    public void RejectsMalformedCandidateDataRootInsteadOfSkippingIt() {
+        string fixture = Path.Combine(Path.GetTempPath(), "pcl-root-discovery-test-" + Guid.NewGuid().ToString("N"));
+        string users = Path.Combine(fixture, "Minecraft Bedrock", "Users");
+        string valid = Path.Combine(users, "account-a", "games", "com.mojang");
+        string invalid = Path.Combine(users, "account-b", "games", "com.mojang");
+        Directory.CreateDirectory(valid); Directory.CreateDirectory(Path.GetDirectoryName(invalid)!);
+        try {
+            File.WriteAllText(invalid, "user file");
+            var installation = new BedrockInstallation("Microsoft.MinecraftUWP_8wekyb3d8bbwe", "package", "app", "1", "x64", "正式版", "未知", "未知");
+            var finder = new BedrockDataRootFinder(Path.Combine(fixture, "local"), fixture);
+            try { finder.Find(installation); throw new Exception("file in candidate root was silently skipped"); }
+            catch (InvalidDataException) { }
+            Check(File.ReadAllText(invalid) == "user file", "invalid candidate was modified");
+            File.Delete(invalid);
+            Check(finder.Find(installation).Single().Path == valid, "genuinely absent candidate was not skipped");
+            string invalidParent = Path.GetDirectoryName(invalid)!;
+            Directory.Delete(invalidParent);
+            File.WriteAllText(invalidParent, "occupied ancestor");
+            try { finder.Find(installation); throw new Exception("file in candidate ancestor was silently skipped"); }
+            catch (InvalidDataException) { }
+            Check(File.ReadAllText(invalidParent) == "occupied ancestor", "candidate ancestor was modified");
+        } finally { TestPaths.DeleteFixture(fixture); }
+    }
+
     public void ReportsInvalidWorldMetadataWithoutDiscardingWorld() => WithWorld((_, root, world) => {
         File.WriteAllText(Path.Combine(world, "world_behavior_packs.json"), "[\"bad\"]");
         var item = BedrockWorldReader.Read(new BedrockDataRoot(root, "fixture")).Single();

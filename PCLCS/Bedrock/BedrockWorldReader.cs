@@ -36,11 +36,12 @@ public sealed class BedrockDataRootFinder(string localAppData, string roamingApp
         string productFolder = installation.FamilyName.StartsWith("Microsoft.MinecraftWindowsBeta_", StringComparison.Ordinal)
             ? "Minecraft Bedrock Preview" : "Minecraft Bedrock";
         string users = System.IO.Path.Combine(roamingAppData, productFolder, "Users");
-        if (Directory.Exists(users)) {
+        if (DirectoryIsPresent(users)) {
             EnsureNoReparsePoints(users);
             int scanned = 0;
             foreach (string user in Directory.EnumerateDirectories(users).Take(129)) {
                 if (++scanned > 128) throw new InvalidDataException("发现过多的数据目录。");
+                EnsureNoReparsePoints(user);
                 bool shared = string.Equals(System.IO.Path.GetFileName(user), "shared", StringComparison.OrdinalIgnoreCase);
                 AddIfPresent(result, System.IO.Path.Combine(user, "games", "com.mojang"),
                     shared ? "GDK 共享内容目录" : "GDK 用户目录候选", !shared,
@@ -51,9 +52,23 @@ public sealed class BedrockDataRootFinder(string localAppData, string roamingApp
     }
 
     private static void AddIfPresent(List<BedrockDataRoot> result, string path, string source, bool supportsWorlds, BedrockDataRootKind kind) {
-        if (!Directory.Exists(path)) return;
+        if (!DirectoryIsPresent(path)) return;
         EnsureNoReparsePoints(path);
         result.Add(new(System.IO.Path.GetFullPath(path), source, supportsWorlds, kind));
+    }
+
+    private static bool DirectoryIsPresent(string path) {
+        FileAttributes attributes;
+        try { attributes = File.GetAttributes(path); }
+        catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException) {
+            // An ancestor can be a file or a link even when the final component is absent.
+            string? parent = Path.GetDirectoryName(Path.GetFullPath(path));
+            if (parent is not null) _ = DirectoryIsPresent(parent);
+            return false;
+        }
+        if ((attributes & FileAttributes.Directory) == 0) throw new InvalidDataException("候选数据目录被文件占用，无法完整发现数据目录。");
+        if ((attributes & FileAttributes.ReparsePoint) != 0) throw new InvalidDataException("候选数据路径包含链接或重解析点，无法完整发现数据目录。");
+        return true;
     }
 
     internal static void EnsureNoReparsePoints(string path) {

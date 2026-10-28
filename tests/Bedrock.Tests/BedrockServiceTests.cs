@@ -22,6 +22,7 @@ public class BedrockServiceTests {
             packTests.RejectsUnsafePathsAndDuplicateNames,
             packTests.RejectsWorldAndInvalidManifest,
             worldTests.FindsCandidateAndReadsWorldPackReferences,
+            worldTests.RejectsMalformedCandidateDataRootInsteadOfSkippingIt,
             worldTests.ReportsInvalidWorldMetadataWithoutDiscardingWorld,
             worldTests.CreatesAndVerifiesBackupWithoutChangingWorld,
             worldTests.BacksUpHighlyCompressibleWorldData,
