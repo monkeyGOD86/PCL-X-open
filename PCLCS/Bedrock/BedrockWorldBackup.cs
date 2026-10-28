@@ -49,6 +49,11 @@ public static class BedrockWorldBackup {
         BedrockDataRootFinder.EnsureNoReparsePoints(parent);
         if (File.Exists(output) || Directory.Exists(output)) throw new IOException("目标文件已经存在，请选择其他名称。");
         string temporary = output + ".partial-" + Guid.NewGuid().ToString("N");
+        // Coordinate with other launcher operations on this root; this does not lock the game or cloud sync.
+        using var rootLock = BedrockRootLock.Acquire(selectedRoot);
+        BedrockDataRootFinder.EnsureNoReparsePoints(worldPath);
+        foreach (string protectedRoot in roots) BedrockDataRootFinder.EnsureNoReparsePoints(protectedRoot);
+        BedrockDataRootFinder.EnsureNoReparsePoints(parent);
         bool temporaryCreated = false;
         try {
             var entries = new JArray();
@@ -259,6 +264,8 @@ public static class BedrockWorldBackup {
         string worldsPath = Path.Combine(rootPath, "minecraftWorlds");
         BedrockDataRootFinder.EnsureNoReparsePoints(rootPath);
         if (!Directory.Exists(worldsPath)) throw new InvalidDataException("所选数据目录没有 minecraftWorlds 文件夹。");
+        BedrockDataRootFinder.EnsureNoReparsePoints(worldsPath);
+        using var rootLock = BedrockRootLock.Acquire(rootPath);
         BedrockDataRootFinder.EnsureNoReparsePoints(worldsPath);
 
         // Prevent writes to the backup between verification and extraction.

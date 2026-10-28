@@ -78,6 +78,8 @@ public class BedrockServiceTests {
             worldPackTests.RefusesGlobalOrUnknownResourceScopeInWorld,
             worldPackTests.BacksUpWorldBeforeConfigChangeAndRestoresBoth,
             worldPackTests.RefusesOccupiedWorldConfigBackupPaths,
+            worldPackTests.SerializesWorldBackupWithConfigChanges,
+            worldPackTests.SerializesWorldRestoreWithOtherRootOperations,
             worldPackTests.ChecksWorldDependencyVersionsAndDetectsChanges,
             worldPackTests.PreservesConcurrentChangesDuringConfigReplacement];
         int failures = 0;

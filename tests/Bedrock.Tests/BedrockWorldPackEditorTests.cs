@@ -133,6 +133,45 @@ public sealed class BedrockWorldPackEditorTests {
             File.ReadAllText(Path.Combine(restoreStage, "previous.json")) == "keep restore file", "restore overwrote existing data");
     });
 
+    public void SerializesWorldBackupWithConfigChanges() => WithFixture((root, world, backup) => {
+        string config = Path.Combine(world.Path, "world_resource_packs.json"), archive = Path.Combine(backup, "world.zip");
+        File.WriteAllText(config, "[]");
+        var snapshot = BedrockWorldPackEditor.Read(root, world, "resource");
+        using var paused = new ManualResetEventSlim();
+        using var release = new ManualResetEventSlim();
+        using var editStarted = new ManualResetEventSlim();
+        Task<BedrockWorldPackChange>? edit = null;
+        var create = Task.Run(() => BedrockWorldBackup.Create(root, world, archive, () => {
+            paused.Set();
+            if (!release.Wait(TimeSpan.FromSeconds(10))) throw new TimeoutException("backup test was not released");
+        }));
+        try {
+            Check(paused.Wait(TimeSpan.FromSeconds(10)), "backup did not reach verification");
+            edit = Task.Run(() => { editStarted.Set(); return BedrockWorldPackEditor.SetEnabled(root, world, snapshot, Pack, true, backup); });
+            Check(editStarted.Wait(TimeSpan.FromSeconds(10)) && !edit.Wait(250), "world edit was not serialized behind backup");
+        } finally {
+            release.Set();
+            Task.WaitAll(edit is null ? [create] : [create, edit]);
+        }
+        Check(BedrockWorldBackup.Verify(archive).Files > 0 && File.ReadAllText(config).Contains(Pack.Uuid.ToString()), "serialized operations failed");
+        string restored = BedrockWorldBackup.RestoreAsNew(root, archive);
+        Check(File.ReadAllText(Path.Combine(restored, "world_resource_packs.json")) == "[]", "backup included later edit");
+    });
+
+    public void SerializesWorldRestoreWithOtherRootOperations() => WithFixture((root, world, backup) => {
+        string archive = Path.Combine(backup, "world.zip");
+        BedrockWorldBackup.Create(root, world, archive);
+        using var started = new ManualResetEventSlim();
+        Task<string> restore;
+        bool blocked;
+        using (BedrockRootLock.Acquire(root.Path)) {
+            restore = Task.Run(() => { started.Set(); return BedrockWorldBackup.RestoreAsNew(root, archive); });
+            blocked = started.Wait(TimeSpan.FromSeconds(10)) && !restore.Wait(250);
+        }
+        restore.Wait();
+        Check(blocked && File.Exists(Path.Combine(restore.Result, "level.dat")), "world restore ignored the root lock or did not complete");
+    });
+
     public void ChecksWorldDependencyVersionsAndDetectsChanges() => WithFixture((root, world, _) => {
         string resources = Path.Combine(world.Path, "world_resource_packs.json");
         string behaviors = Path.Combine(world.Path, "world_behavior_packs.json");
