@@ -45,6 +45,7 @@ public class BedrockServiceTests {
             packTests.PreparesArchiveAndDetectsLaterChanges,
             packTests.RejectsArchiveOutsidePackDirectory,
             packTests.PreparesMultiPackAddonWithoutInstalling,
+            packTests.RejectsPreparationInsideProtectedGameRoot,
             packTests.RejectsAddonWithAmbiguousFiles,
             packTests.CommitsAndRollsBackMultiPackTransaction,
             packTests.RecoversInterruptedTransactionAndRefusesChangedContent,

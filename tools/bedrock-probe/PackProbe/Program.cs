@@ -126,7 +126,7 @@ internal static class Program {
         string temp = Path.GetFullPath(Path.GetTempPath()).TrimEnd(Path.DirectorySeparatorChar);
         if (scope.Any(root => IsWithin(root.Path, temp))) throw new InvalidDataException("临时目录位于游戏数据目录中，不能准备测试包。");
         IReadOnlyList<BedrockPreparedPack> packs = isAddon
-            ? BedrockArchivePreparer.PrepareMcaddon(fixture, temp).Packs
+            ? BedrockArchivePreparer.PrepareMcaddon(fixture, temp, scope).Packs
             : [new BedrockPreparedPack(fixture, BedrockDirectoryInstaller.Preview(fixture))];
         if (packs.Any(item => item.Preview.Pack.Version != "1.0.0" || item.Preview.Pack.Modules.Count != 1) ||
             (!isAddon && (packs.Count != 1 || packs[0].Preview.Pack.Name != "PCL Compatibility Test" || packs[0].Preview.Pack.Modules[0] != "resources")) ||

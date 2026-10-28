@@ -17,6 +17,32 @@ public static class BedrockArchivePreparer {
     private const long MaxFileBytes = 256L * 1024 * 1024;
     private const long MaxTotalBytes = 1024L * 1024 * 1024;
 
+    /// <summary>Prepares an addon only after checking the temporary parent against the supplied game roots.</summary>
+    public static BedrockPreparedAddon PrepareMcaddon(string archivePath, string temporaryParent, IReadOnlyList<BedrockDataRoot> protectedRoots) {
+        ValidateTemporaryParent(temporaryParent, protectedRoots);
+        return PrepareMcaddon(archivePath, temporaryParent);
+    }
+
+    /// <summary>Prepares a pack only after checking the temporary parent against the supplied game roots.</summary>
+    public static BedrockPreparedPack PrepareMcpack(string archivePath, string temporaryParent, IReadOnlyList<BedrockDataRoot> protectedRoots) {
+        ValidateTemporaryParent(temporaryParent, protectedRoots);
+        return PrepareMcpack(archivePath, temporaryParent);
+    }
+
+    private static void ValidateTemporaryParent(string temporaryParent, IReadOnlyList<BedrockDataRoot> protectedRoots) {
+        if (protectedRoots.Count is < 1 or > 129) throw new InvalidDataException("临时目录保护范围无效。");
+        string parent = Path.GetFullPath(temporaryParent).TrimEnd(Path.DirectorySeparatorChar);
+        BedrockDataRootFinder.EnsureNoReparsePoints(parent);
+        string[] roots = protectedRoots.Select(root => Path.GetFullPath(root.Path).TrimEnd(Path.DirectorySeparatorChar)).ToArray();
+        if (roots.Distinct(StringComparer.OrdinalIgnoreCase).Count() != roots.Length) throw new InvalidDataException("临时目录保护范围包含重复目录。");
+        foreach (string root in roots) {
+            BedrockDataRootFinder.EnsureNoReparsePoints(root);
+            if (string.Equals(root, parent, StringComparison.OrdinalIgnoreCase) ||
+                parent.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidDataException("临时目录位于游戏数据中，不能准备附加包。");
+        }
+    }
+
     /// <summary>Prepares mcaddon members for review; does not install them.</summary>
     public static BedrockPreparedAddon PrepareMcaddon(string archivePath, string temporaryParent) {
         if (!Path.GetExtension(archivePath).Equals(".mcaddon", StringComparison.OrdinalIgnoreCase))

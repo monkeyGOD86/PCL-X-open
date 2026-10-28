@@ -901,9 +901,9 @@ Public Class PageBedrockRight
         SetBusy(True)
         Dim Transaction As String = Nothing
         Try
-            LabPackInfo.Text = "正在准备并校验附加包…"
-            Dim Packs = Await Task.Run(Function() PrepareSupportedPacks(Source, IsDirectory))
             Dim Roots = Await Task.Run(Function() ValidateInstallTarget(Installation, Root))
+            LabPackInfo.Text = "正在准备并校验附加包…"
+            Dim Packs = Await Task.Run(Function() PrepareSupportedPacks(Source, IsDirectory, Roots))
             LabPackInfo.Text = "正在检查附加包依赖…"
             Dim Dependencies = Await Task.Run(Function() DescribeDependencies(Packs, Roots))
             Dim DependencyText = If(Dependencies.Count = 0, "无声明依赖。", String.Join(vbCrLf, Dependencies.Take(12)) &
@@ -939,14 +939,14 @@ Public Class PageBedrockRight
         End Try
     End Sub
 
-    Private Shared Function PrepareSupportedPacks(Source As String, IsDirectory As Boolean) As IReadOnlyList(Of BedrockPreparedPack)
+    Private Shared Function PrepareSupportedPacks(Source As String, IsDirectory As Boolean, Roots As IReadOnlyList(Of BedrockDataRoot)) As IReadOnlyList(Of BedrockPreparedPack)
         Dim Packs As IReadOnlyList(Of BedrockPreparedPack)
         If IsDirectory Then
             Packs = {New BedrockPreparedPack(Source, BedrockDirectoryInstaller.Preview(Source))}
         ElseIf Path.GetExtension(Source).Equals(".mcpack", StringComparison.OrdinalIgnoreCase) Then
-            Packs = {BedrockArchivePreparer.PrepareMcpack(Source, Path.GetTempPath())}
+            Packs = {BedrockArchivePreparer.PrepareMcpack(Source, Path.GetTempPath(), Roots)}
         ElseIf Path.GetExtension(Source).Equals(".mcaddon", StringComparison.OrdinalIgnoreCase) Then
-            Packs = BedrockArchivePreparer.PrepareMcaddon(Source, Path.GetTempPath()).Packs
+            Packs = BedrockArchivePreparer.PrepareMcaddon(Source, Path.GetTempPath(), Roots).Packs
         Else
             Throw New InvalidDataException("不支持的附加包格式。")
         End If

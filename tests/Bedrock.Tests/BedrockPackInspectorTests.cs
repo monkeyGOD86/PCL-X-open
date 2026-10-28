@@ -248,6 +248,25 @@ public sealed class BedrockPackInspectorTests {
         } finally { TestPaths.DeleteFixture(fixture); }
     }
 
+    public void RejectsPreparationInsideProtectedGameRoot() {
+        string fixture = Path.Combine(Path.GetTempPath(), "pcl-preparation-scope-test-" + Guid.NewGuid().ToString("N"));
+        string game = Path.Combine(fixture, "game"), temporary = Path.Combine(game, "temp"), outside = Path.Combine(fixture, "game-sibling");
+        Directory.CreateDirectory(temporary); Directory.CreateDirectory(outside);
+        try {
+            string pack = Path.Combine(fixture, "test.mcpack"), addon = Path.Combine(fixture, "test.mcaddon");
+            using (var file = File.Create(pack)) using (var zip = new ZipArchive(file, ZipArchiveMode.Create)) Add(zip, "manifest.json", Manifest);
+            using (var file = File.Create(addon)) using (var zip = new ZipArchive(file, ZipArchiveMode.Create)) Add(zip, "member/manifest.json", Manifest);
+            var root = new BedrockDataRoot(game, "fixture");
+            try { BedrockArchivePreparer.PrepareMcpack(pack, temporary, [root]); throw new Exception("pack preparation inside game data accepted"); }
+            catch (InvalidDataException) { }
+            try { BedrockArchivePreparer.PrepareMcaddon(addon, temporary, [root]); throw new Exception("addon preparation inside game data accepted"); }
+            catch (InvalidDataException) { }
+            Check(!Directory.EnumerateFileSystemEntries(temporary).Any(), "rejected preparation wrote into game data");
+            var prepared = BedrockArchivePreparer.PrepareMcaddon(addon, outside, [root]);
+            Check(prepared.Packs.Count == 1 && Directory.Exists(prepared.Packs[0].Directory), "safe sibling preparation failed");
+        } finally { TestPaths.DeleteFixture(fixture); }
+    }
+
     public void RejectsAddonWithAmbiguousFiles() {
         string fixture = Path.Combine(Path.GetTempPath(), "pcl-bedrock-addon-test-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(fixture);
