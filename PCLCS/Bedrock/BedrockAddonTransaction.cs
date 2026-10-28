@@ -11,7 +11,7 @@ public sealed class BedrockAddonTransactionInfo(string path, string state, int s
     public string? Error { get; } = error;
 }
 
-/// <summary>Experimental journalled multi-pack installation; not connected to the UI.</summary>
+/// <summary>Experimental journalled multi-pack installation with recoverable staging.</summary>
 public static class BedrockAddonTransaction {
     private const string Prefix = ".pcl-addon-transaction-";
     private const string JournalName = "journal.json";

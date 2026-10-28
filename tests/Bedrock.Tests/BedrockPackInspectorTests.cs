@@ -385,6 +385,24 @@ public sealed class BedrockPackInspectorTests {
         } finally { TestPaths.DeleteFixture(fixture); }
     }
 
+    public void RemovesAndRestoresBehaviorPack() {
+        string fixture = Path.Combine(Path.GetTempPath(), "pcl-bedrock-behavior-remove-test-" + Guid.NewGuid().ToString("N"));
+        string game = Path.Combine(fixture, "game"), backup = Path.Combine(fixture, "backup");
+        string pack = Path.Combine(game, "behavior_packs", "package");
+        Directory.CreateDirectory(pack); Directory.CreateDirectory(backup); Directory.CreateDirectory(Path.Combine(game, "minecraftWorlds"));
+        try {
+            File.WriteAllText(Path.Combine(pack, "manifest.json"), Manifest.Replace("\"type\":\"resources\"", "\"type\":\"data\""));
+            File.WriteAllText(Path.Combine(pack, "payload.txt"), "behavior fixture");
+            var root = new BedrockDataRoot(game, "fixture");
+            var selected = BedrockAddonCatalog.Read(root).Single();
+            Check(selected.Category == "行为包" && selected.Manifest!.Modules.Contains("data"), "behavior pack not identified");
+            var removal = BedrockAddonRemoval.Remove(root, selected, BedrockDirectoryInstaller.Preview(pack), backup, [root], [root]);
+            Check(!Directory.Exists(pack) && File.ReadAllText(Path.Combine(removal.BackupPath, "payload.txt")) == "behavior fixture", "behavior backup or quarantine missing");
+            BedrockAddonRemoval.Restore(root, removal.TransactionPath, [root]);
+            Check(File.ReadAllText(Path.Combine(pack, "payload.txt")) == "behavior fixture", "behavior pack not restored");
+        } finally { TestPaths.DeleteFixture(fixture); }
+    }
+
     public void RefusesRemovalForCandidateGlobalReferencesAndInvalidConfig() {
         string fixture = Path.Combine(Path.GetTempPath(), "pcl-bedrock-global-usage-test-" + Guid.NewGuid().ToString("N"));
         string shared = Path.Combine(fixture, "shared"), account = Path.Combine(fixture, "account"), backup = Path.Combine(fixture, "backup");

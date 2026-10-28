@@ -24,8 +24,8 @@
                         <local:MyButton x:Name="BtnFolder" Text="预览包文件夹" Height="35" MinWidth="120" Margin="10,0,0,0" />
                         <local:MyButton x:Name="BtnWorlds" Text="数据与世界" Height="35" MinWidth="120" Margin="10,0,0,0" IsEnabled="False" />
                     </StackPanel>
-                    <local:MyButton x:Name="BtnInstallPack" Text="安装已预览的资源包（实验）" Height="35" Width="230" HorizontalAlignment="Left" Margin="0,10,0,0" IsEnabled="False" />
-                    <TextBlock x:Name="LabInstallHint" Text="请先预览资源包并选择目标数据目录。" Margin="0,8,0,0" TextWrapping="Wrap" />
+                    <local:MyButton x:Name="BtnInstallPack" Text="安装已预览的附加包（实验）" Height="35" Width="230" HorizontalAlignment="Left" Margin="0,10,0,0" IsEnabled="False" />
+                    <TextBlock x:Name="LabInstallHint" Text="请先预览附加包并选择目标数据目录。" Margin="0,8,0,0" TextWrapping="Wrap" />
                 </StackPanel>
             </local:MyCard>
             <local:MyCard x:Name="CardWorlds" Title="数据目录与内容" Margin="0,0,0,15" Visibility="Collapsed">
@@ -57,7 +57,7 @@
                     <TextBlock x:Name="LabAddonDetails" Margin="0,10,0,0" TextWrapping="Wrap" />
                     <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
                         <local:MyButton x:Name="BtnCheckDependencies" Text="检查所选包的依赖" Height="35" Width="160" IsEnabled="False" />
-                        <local:MyButton x:Name="BtnRemoveAddon" Text="移除所选资源包（实验）" Height="35" Width="190" Margin="10,0,0,0" IsEnabled="False" />
+                        <local:MyButton x:Name="BtnRemoveAddon" Text="移除所选附加包（实验）" Height="35" Width="190" Margin="10,0,0,0" IsEnabled="False" />
                     </StackPanel>
                     <TextBlock Text="附加包事务恢复（实验性）" FontSize="14" Margin="0,20,0,0" />
                     <TextBlock Text="仅列出此数据目录中由启动器保留的事务；状态基于路径，恢复时会重新校验内容。" Margin="0,8,0,0" TextWrapping="Wrap" />

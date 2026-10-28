@@ -320,25 +320,25 @@ Public Class PageBedrockRight
         Dim Addon = TryCast(TryCast(ComboAddons.SelectedItem, MyComboBoxItem)?.Tag, BedrockInstalledAddon)
         If IsBusy OrElse Not CanRemoveAddon(Installation, Root, Addon) Then Return
         If IsKnownBedrockProcessRunning() Then
-            MyMsgBox("请先关闭 Minecraft 基岩版并等待同步完成。", "移除资源包")
+            MyMsgBox("请先关闭 Minecraft 基岩版并等待同步完成。", "移除附加包")
             Return
         End If
         SetBusy(True)
         Try
-            LabAddonStatus.Text = "正在检查资源包和世界引用…"
+            LabAddonStatus.Text = "正在检查附加包和世界引用…"
             Dim Roots = Await Task.Run(Function() ValidateInstallTarget(Installation, Root))
             Dim WorldRoots = Roots.Where(Function(Item) Item.SupportsWorlds AndAlso Directory.Exists(Path.Combine(Item.Path, "minecraftWorlds"))).ToArray()
             If WorldRoots.Length = 0 Then Throw New InvalidOperationException("没有可检查的世界目录，不能安全移除。")
             Dim Preview = Await Task.Run(Function() BedrockDirectoryInstaller.Preview(Addon.Path))
             If Preview.Pack.Uuid <> Addon.Manifest.Uuid OrElse Preview.Pack.Version <> Addon.Manifest.Version Then
-                Throw New InvalidOperationException("资源包已变化，请重新读取附加包。")
+                Throw New InvalidOperationException("附加包已变化，请重新读取附加包。")
             End If
             Dim Usage = Await Task.Run(Function() BedrockWorldPackUsage.Check(WorldRoots, Preview.Pack.Uuid))
             If Not Usage.Complete Then Throw New InvalidOperationException("部分世界无法完整检查，不能安全移除。")
-            If Usage.References.Count > 0 Then Throw New InvalidOperationException("有世界仍引用此资源包，请先检查世界配置。")
+            If Usage.References.Count > 0 Then Throw New InvalidOperationException("有世界仍引用此附加包，请先检查世界配置。")
             Dim GlobalUsage = Await Task.Run(Function() BedrockGlobalPackUsage.Check(Roots, Preview.Pack.Uuid))
             If GlobalUsage.IncompletePaths.Count > 0 Then Throw New InvalidOperationException("候选全局资源配置无法完整检查，不能安全移除。")
-            If GlobalUsage.References.Count > 0 Then Throw New InvalidOperationException("候选全局资源配置仍引用此资源包，请先检查游戏设置。")
+            If GlobalUsage.References.Count > 0 Then Throw New InvalidOperationException("候选全局资源配置仍引用此附加包，请先检查游戏设置。")
             Using Dialog As New System.Windows.Forms.FolderBrowserDialog With {.Description = "选择游戏数据目录之外的备份文件夹", .ShowNewFolderButton = True}
                 If Dialog.ShowDialog() <> System.Windows.Forms.DialogResult.OK Then
                     LabAddonStatus.Text = "已取消移除。"
@@ -348,7 +348,7 @@ Public Class PageBedrockRight
                 If Roots.Any(Function(Item) IsWithinRoot(Item.Path, Backup)) Then Throw New InvalidOperationException("备份不能位于候选游戏数据目录内。")
                 Dim Skipped = Roots.Where(Function(Item) Item.SupportsWorlds AndAlso Not WorldRoots.Any(Function(WorldRoot) String.Equals(WorldRoot.Path, Item.Path, StringComparison.OrdinalIgnoreCase))).ToArray()
                 If MyMsgBox("请确认游戏已关闭且同步完成。此功能尚未在真实用户附加包上验证。" & vbCrLf & vbCrLf &
-                            "资源包：" & Preview.Pack.Name & "　" & Preview.Pack.Version & vbCrLf & "UUID：" & Preview.Pack.Uuid.ToString() & vbCrLf &
+                            "附加包：" & Preview.Pack.Name & "　" & Preview.Pack.Version & vbCrLf & "UUID：" & Preview.Pack.Uuid.ToString() & vbCrLf &
                             "原目录：" & Addon.Path & vbCrLf & "备份目录：" & Backup & vbCrLf &
                             "已检查世界目录：" & vbCrLf & String.Join(vbCrLf, WorldRoots.Select(Function(Item) Item.Path)) & vbCrLf &
                             If(Skipped.Length > 0, "未检查的候选世界目录：" & vbCrLf & String.Join(vbCrLf, Skipped.Select(Function(Item) Item.Path)) & vbCrLf, "") &
@@ -356,7 +356,7 @@ Public Class PageBedrockRight
                     LabAddonStatus.Text = "已取消移除。"
                     Return
                 End If
-                LabAddonStatus.Text = "正在备份并隔离资源包…"
+                LabAddonStatus.Text = "正在备份并隔离附加包…"
                 Dim Removed = Await Task.Run(Function()
                                                  If IsKnownBedrockProcessRunning() Then Throw New InvalidOperationException("Minecraft 正在运行，请关闭后重试。")
                                                  Dim CurrentRoots = ValidateInstallTarget(Installation, Root)
@@ -367,12 +367,12 @@ Public Class PageBedrockRight
                                              End Function)
                 ComboAddons.Items.Clear()
                 LabAddonDetails.Text = ""
-                LabAddonStatus.Text = "资源包已移入隔离目录。外部备份：" & Removed.BackupPath & vbCrLf & "事务：" & Removed.TransactionPath &
+                LabAddonStatus.Text = "附加包已移入隔离目录。外部备份：" & Removed.BackupPath & vbCrLf & "事务：" & Removed.TransactionPath &
                                       vbCrLf & "可在移除记录中恢复；游戏引用状态需自行确认。"
             End Using
         Catch ex As Exception
             LabAddonStatus.Text = "移除未完成：" & ex.Message
-            Logger.Warn(ex, "实验性基岩版资源包移除失败")
+            Logger.Warn(ex, "实验性基岩版附加包移除失败")
         Finally
             SetBusy(False)
         End Try
@@ -387,7 +387,8 @@ Public Class PageBedrockRight
 
     Private Shared Function CanRemoveAddon(Installation As BedrockInstallation, Root As BedrockDataRoot, Addon As BedrockInstalledAddon) As Boolean
         Return IsValidatedResourceTarget(Installation, Root) AndAlso Addon IsNot Nothing AndAlso Addon.Manifest IsNot Nothing AndAlso
-               Addon.Category = "资源包" AndAlso Addon.Manifest.Modules.Contains("resources") AndAlso Not Addon.Manifest.Modules.Contains("data")
+               ((Addon.Category = "资源包" AndAlso Addon.Manifest.Modules.Contains("resources") AndAlso Not Addon.Manifest.Modules.Contains("data")) OrElse
+                (Addon.Category = "行为包" AndAlso Addon.Manifest.Modules.Contains("data") AndAlso Not Addon.Manifest.Modules.Contains("resources")))
     End Function
 
     Private Sub RefreshRemoveAddonButton()
@@ -885,21 +886,21 @@ Public Class PageBedrockRight
         Dim IsDirectory = SelectedPackIsDirectory
         If IsBusy OrElse String.IsNullOrEmpty(Source) OrElse Not IsValidatedResourceTarget(Installation, Root) Then Return
         If IsKnownBedrockProcessRunning() Then
-            MyMsgBox("请先关闭 Minecraft 基岩版并等待同步完成。", "安装资源包")
+            MyMsgBox("请先关闭 Minecraft 基岩版并等待同步完成。", "安装附加包")
             Return
         End If
         SetBusy(True)
         Dim Transaction As String = Nothing
         Try
-            LabPackInfo.Text = "正在准备并校验资源包…"
-            Dim Packs = Await Task.Run(Function() PrepareResourcePacks(Source, IsDirectory))
+            LabPackInfo.Text = "正在准备并校验附加包…"
+            Dim Packs = Await Task.Run(Function() PrepareSupportedPacks(Source, IsDirectory))
             Dim Roots = Await Task.Run(Function() ValidateInstallTarget(Installation, Root))
-            LabPackInfo.Text = "正在检查资源包依赖…"
+            LabPackInfo.Text = "正在检查附加包依赖…"
             Dim Dependencies = Await Task.Run(Function() DescribeDependencies(Packs, Roots))
             Dim DependencyText = If(Dependencies.Count = 0, "无声明依赖。", String.Join(vbCrLf, Dependencies.Take(12)) &
                                     If(Dependencies.Count > 12, vbCrLf & $"另有 {Dependencies.Count - 12} 项未显示，请检查包的完整依赖。", ""))
             Dim Scope = String.Join(vbCrLf, Roots.Select(Function(Item) Item.Path))
-            If MyMsgBox("请确认游戏已关闭且同步完成。此功能仅在一台设备上验证过资源包布局。" & vbCrLf & vbCrLf &
+            If MyMsgBox("请确认游戏已关闭且同步完成。仅在一台设备上观察到资源包和行为包；界面安装流程尚未实测。" & vbCrLf & vbCrLf &
                         "目标目录：" & Root.Path & vbCrLf & "检查目录：" & vbCrLf & Scope & vbCrLf & vbCrLf &
                         DescribePacks(Packs.Select(Function(Item) Item.Preview.Pack)) & vbCrLf & "依赖检查：" & vbCrLf & DependencyText & vbCrLf &
                         "将创建可恢复事务和新包目录，不覆盖现有包。游戏是否识别需自行确认。", "确认实验性安装", "安装", "取消") <> 1 Then
@@ -913,23 +914,23 @@ Public Class PageBedrockRight
                                              If Not SameRoots(Roots, CurrentRoots) Then Throw New InvalidOperationException("数据目录范围已变化，请重新确认。")
                                              Return BedrockAddonTransaction.Prepare(Root, Packs, CurrentRoots)
                                          End Function)
-            LabPackInfo.Text = "正在提交资源包；事务目录：" & Transaction
+            LabPackInfo.Text = "正在提交附加包；事务目录：" & Transaction
             Await Task.Run(Sub()
                                If IsKnownBedrockProcessRunning() Then Throw New InvalidOperationException("Minecraft 正在运行，请关闭后重试。")
                                Dim CurrentRoots = ValidateInstallTarget(Installation, Root)
                                If Not SameRoots(Roots, CurrentRoots) Then Throw New InvalidOperationException("数据目录范围已变化，请重新确认。")
                                BedrockAddonTransaction.Commit(Root, Transaction, CurrentRoots)
                            End Sub)
-            LabPackInfo.Text = "资源包文件已放置。游戏是否识别或启用需在游戏中确认。事务目录：" & Transaction
+            LabPackInfo.Text = "附加包文件已放置。游戏是否识别或启用需在游戏中确认。事务目录：" & Transaction
         Catch ex As Exception
             LabPackInfo.Text = "安装未完成：" & ex.Message & If(Transaction Is Nothing, "", vbCrLf & "保留事务并在数据页面检查恢复：" & Transaction)
-            Logger.Warn(ex, "实验性基岩版资源包安装失败")
+            Logger.Warn(ex, "实验性基岩版附加包安装失败")
         Finally
             SetBusy(False)
         End Try
     End Sub
 
-    Private Shared Function PrepareResourcePacks(Source As String, IsDirectory As Boolean) As IReadOnlyList(Of BedrockPreparedPack)
+    Private Shared Function PrepareSupportedPacks(Source As String, IsDirectory As Boolean) As IReadOnlyList(Of BedrockPreparedPack)
         Dim Packs As IReadOnlyList(Of BedrockPreparedPack)
         If IsDirectory Then
             Packs = {New BedrockPreparedPack(Source, BedrockDirectoryInstaller.Preview(Source))}
@@ -942,8 +943,8 @@ Public Class PageBedrockRight
         End If
         If Packs.Count > 16 Then Throw New InvalidDataException("每次最多安装 16 个包；准备目录已保留：" & vbCrLf &
                                                                   String.Join(vbCrLf, Packs.Select(Function(Item) Item.Directory)))
-        If Packs.Any(Function(Item) Not Item.Preview.Pack.Modules.Contains("resources") OrElse Item.Preview.Pack.Modules.Contains("data")) Then
-            Throw New InvalidDataException("当前实验性安装仅支持资源包；行为包及混合包尚未验证。准备目录已保留：" &
+        If Packs.Any(Function(Item) Item.Preview.Pack.Modules.Contains("resources") = Item.Preview.Pack.Modules.Contains("data")) Then
+            Throw New InvalidDataException("每个包必须能够明确区分为资源包或行为包；准备目录已保留：" &
                                            vbCrLf & String.Join(vbCrLf, Packs.Select(Function(Item) Item.Directory)))
         End If
         Return Packs
@@ -992,11 +993,11 @@ Public Class PageBedrockRight
         BtnInstallPack.IsEnabled = Not IsBusy AndAlso Not String.IsNullOrEmpty(SelectedPackPath) AndAlso IsValidatedResourceTarget(Installation, Root)
         If LabInstallHint Is Nothing Then Return
         If String.IsNullOrEmpty(SelectedPackPath) OrElse Root Is Nothing Then
-            LabInstallHint.Text = "请先预览资源包，并在数据与世界中选择目标目录。"
+            LabInstallHint.Text = "请先预览附加包，并在数据与世界中选择目标目录。"
         ElseIf Not IsValidatedResourceTarget(Installation, Root) Then
             LabInstallHint.Text = "此实验功能仅开放给正式版 x64 包 1.26.5203.0 的 GDK 共享目录；其他安装类型和版本尚待验证。"
         Else
-            LabInstallHint.Text = "仅支持资源包；安装前将再次校验内容和目标，并要求确认游戏已关闭且同步完成。"
+            LabInstallHint.Text = "支持类型明确的资源包和行为包；安装前将校验内容与目标，并要求确认游戏已关闭且同步完成。"
         End If
     End Sub
 
