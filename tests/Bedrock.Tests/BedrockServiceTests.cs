@@ -114,6 +114,10 @@ public class BedrockServiceTests {
         var activator = new FakeActivator { ProcessId = 123 };
         var service = new BedrockService(catalog, activator);
         Assert.Contains("预览版", service.Detect().Error);
+        Assert.Equal(selected, BedrockService.MatchInstallation(partial, selected, false));
+        Assert.Null(BedrockService.MatchInstallation(partial, selected, true));
+        Assert.Null(BedrockService.MatchInstallation(partial, Installation("other"), false));
+        Assert.Equal(selected, BedrockService.MatchInstallation(new BedrockDetectionResult([selected], null), selected, true));
         Assert.True(service.Launch(selected).Accepted);
         Assert.Equal("family!Game", activator.LastId);
         var unconfirmed = service.Launch(Installation("other"));

@@ -56,15 +56,21 @@ public sealed class BedrockService(IBedrockPackageCatalog catalog, IBedrockActiv
         try {
             // A previously selected registration can disappear or change after a Store update.
             var detection = Detect();
-            var current = detection.Installations.FirstOrDefault(candidate =>
-                string.Equals(candidate.FamilyName, selected.FamilyName, StringComparison.OrdinalIgnoreCase) &&
-                string.Equals(candidate.PackageFullName, selected.PackageFullName, StringComparison.OrdinalIgnoreCase) &&
-                string.Equals(candidate.AppUserModelId, selected.AppUserModelId, StringComparison.OrdinalIgnoreCase));
+            var current = MatchInstallation(detection, selected, false);
             if (current is null) return new(false, detection.Error is null ? "安装状态已更改，请刷新后重新选择。" : "无法重新确认安装状态：" + detection.Error);
             return new(true, null, activator.Activate(current.AppUserModelId));
         } catch (Exception ex) when (IsPlatformError(ex)) {
             return new(false, Describe(ex));
         }
+    }
+
+    /// <summary>Revalidates an exact registration; callers can require every channel query to have succeeded.</summary>
+    public static BedrockInstallation? MatchInstallation(BedrockDetectionResult result, BedrockInstallation selected, bool requireComplete) {
+        if (result is null || selected is null || requireComplete && result.Error is not null) return null;
+        return result.Installations.FirstOrDefault(candidate =>
+            string.Equals(candidate.FamilyName, selected.FamilyName, StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(candidate.PackageFullName, selected.PackageFullName, StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(candidate.AppUserModelId, selected.AppUserModelId, StringComparison.OrdinalIgnoreCase));
     }
 
     internal static bool IsPlatformError(Exception ex) => ex is Win32Exception or UnauthorizedAccessException or

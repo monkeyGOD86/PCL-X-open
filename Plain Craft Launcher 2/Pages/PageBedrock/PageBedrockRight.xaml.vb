@@ -434,7 +434,7 @@ Public Class PageBedrockRight
         LabAddonStatus.Text = "正在检查候选数据目录中的依赖…"
         Try
             Dim Report = Await Task.Run(Function()
-                                            Dim Roots = ValidateInstallTarget(Installation, Root)
+                                            Dim Roots = ValidateInstallTarget(Installation, Root, False)
                                             Dim Current = BedrockAddonCatalog.Read(Root).FirstOrDefault(Function(Item) String.Equals(Item.Path, Addon.Path, StringComparison.OrdinalIgnoreCase))
                                             If Current Is Nothing OrElse Current.Manifest Is Nothing OrElse Current.Manifest.Uuid <> Addon.Manifest.Uuid OrElse
                                                Current.Manifest.Version <> Addon.Manifest.Version OrElse Not Current.Manifest.Dependencies.SequenceEqual(Addon.Manifest.Dependencies) Then
@@ -509,7 +509,7 @@ Public Class PageBedrockRight
         SetBusy(True)
         Try
             Dim Result = Await Task.Run(Function()
-                                            Dim Roots = ValidateInstallTarget(Installation, Root)
+                                            Dim Roots = ValidateInstallTarget(Installation, Root, False)
                                             Return CollectWorldAddons(Roots, Root, World)
                                         End Function)
             WorldAddonScanIncomplete = Result.IncompleteRoots.Count > 0
@@ -1037,10 +1037,10 @@ Public Class PageBedrockRight
         Return Lines
     End Function
 
-    Private Function ValidateInstallTarget(Installation As BedrockInstallation, Root As BedrockDataRoot) As IReadOnlyList(Of BedrockDataRoot)
+    Private Function ValidateInstallTarget(Installation As BedrockInstallation, Root As BedrockDataRoot,
+                                           Optional RequireComplete As Boolean = True) As IReadOnlyList(Of BedrockDataRoot)
         Dim Result = Service.Detect()
-        If Result.Error IsNot Nothing OrElse Not Result.Installations.Any(Function(Item) Item.FamilyName = Installation.FamilyName AndAlso
-            Item.PackageFullName = Installation.PackageFullName AndAlso Item.AppUserModelId = Installation.AppUserModelId) Then
+        If BedrockService.MatchInstallation(Result, Installation, RequireComplete) Is Nothing Then
             Throw New InvalidOperationException("游戏注册状态已变化，请刷新后重试。")
         End If
         Dim Roots = (New BedrockDataRootFinder()).Find(Installation)
