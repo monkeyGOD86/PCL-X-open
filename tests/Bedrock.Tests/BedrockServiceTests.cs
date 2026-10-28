@@ -40,6 +40,7 @@ public class BedrockServiceTests {
             worldTests.DistinguishesSharedContentDirectory,
             worldTests.LimitsExperimentalActionsToObservedPackageAndRootKind,
             worldTests.DetectsWorldPackUsageAndIncompleteWorlds,
+            worldTests.TreatsWorldConfigBeingWrittenAsIncomplete,
             packTests.InspectsUnpackedPackAndDetectsInstalledConflicts,
             packTests.InstallsDirectoryWithoutOverwritingAndRejectsDuplicates,
             packTests.RejectsChangedPreviewAndUnrecognisedInstalledPack,

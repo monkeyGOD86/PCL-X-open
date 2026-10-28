@@ -339,6 +339,21 @@ public sealed class BedrockWorldReaderTests {
         Check(!usage.Complete, "empty UUID was treated as a complete scan");
     });
 
+    public void TreatsWorldConfigBeingWrittenAsIncomplete() => WithWorld((_, root, world) => {
+        if (Environment.OSVersion.Platform != PlatformID.Win32NT) return;
+        string config = Path.Combine(world, "world_resource_packs.json");
+        Guid uuid = Guid.Parse("11111111-1111-4111-8111-111111111111");
+        File.WriteAllText(Path.Combine(world, "level.dat"), "fixture");
+        File.WriteAllText(config, "[{\"pack_id\":\"11111111-1111-4111-8111-111111111111\",\"version\":[1,2,3]}]");
+        var rootInfo = new BedrockDataRoot(root, "fixture");
+        using (var writer = new FileStream(config, FileMode.Open, FileAccess.Write, FileShare.ReadWrite)) {
+            var usage = BedrockWorldPackUsage.Check([rootInfo], uuid);
+            Check(!usage.Complete, "configuration with active writer was treated as safely read");
+        }
+        var complete = BedrockWorldPackUsage.Check([rootInfo], uuid);
+        Check(complete.Complete && complete.References.Count == 1, "reference missing after writer closed");
+    });
+
     private static void WithWorld(Action<string, string, string> test) {
         string temp = Path.Combine(Path.GetTempPath(), "pcl-bedrock-world-test-" + Guid.NewGuid().ToString("N"));
         string product = Path.Combine(temp, "Minecraft Bedrock");

@@ -145,7 +145,8 @@ public static class BedrockWorldReader {
     private static string ReadText(string path, int maxBytes) {
         if ((File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0)
             throw new InvalidDataException("世界文件是链接，无法安全读取。");
-        using var file = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+        // Fail closed if another Windows process is writing the configuration while it is read.
+        using var file = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
         if (file.Length > maxBytes) throw new InvalidDataException("世界元数据过大。");
         using var content = new MemoryStream();
         byte[] buffer = new byte[4096];
