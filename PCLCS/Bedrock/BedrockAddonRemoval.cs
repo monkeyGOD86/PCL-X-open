@@ -69,7 +69,7 @@ public static class BedrockAddonRemoval {
             string.Equals(Path.GetFullPath(item.Path).TrimEnd(Path.DirectorySeparatorChar), source, StringComparison.OrdinalIgnoreCase));
         if (match?.Manifest is null) throw new InvalidDataException("所选附加包已不存在或无法识别。");
         Verify(source, confirmed.Pack.Uuid, confirmed.Pack.Version, confirmed.Fingerprint);
-        RequireUnused(worldRoots, globalRoots, confirmed.Pack.Uuid);
+        RequireUnused(worldRoots, globalRoots, source, confirmed.Pack.Uuid);
         string id = Guid.NewGuid().ToString("N");
         string backup = Path.Combine(backupRoot, "pcl-addon-backup-" + id);
         string transaction = Path.Combine(rootPath, Prefix + id);
@@ -91,7 +91,7 @@ public static class BedrockAddonRemoval {
                 file.Flush(true);
             }
             Verify(source, confirmed.Pack.Uuid, confirmed.Pack.Version, confirmed.Fingerprint);
-            RequireUnused(worldRoots, globalRoots, confirmed.Pack.Uuid);
+            RequireUnused(worldRoots, globalRoots, source, confirmed.Pack.Uuid);
             BedrockDataRootFinder.EnsureNoReparsePoints(transaction);
             string content = Path.Combine(transaction, "content");
             Directory.Move(source, content);
@@ -102,13 +102,18 @@ public static class BedrockAddonRemoval {
         }
     }
 
-    private static void RequireUnused(IReadOnlyList<BedrockDataRoot> roots, IReadOnlyList<BedrockDataRoot> globalRoots, Guid uuid) {
+    private static void RequireUnused(IReadOnlyList<BedrockDataRoot> roots, IReadOnlyList<BedrockDataRoot> globalRoots, string source, Guid uuid) {
         var usage = BedrockWorldPackUsage.Check(roots, uuid);
         if (!usage.Complete) throw new InvalidDataException("部分世界无法检查，不能安全移除附加包。");
         if (usage.References.Count > 0) throw new InvalidDataException("所选范围中的世界仍引用此附加包，请先检查世界配置。");
         var global = BedrockGlobalPackUsage.Check(globalRoots, uuid);
         if (global.IncompletePaths.Count > 0) throw new InvalidDataException("候选全局资源配置无法检查，不能安全移除附加包。");
         if (global.References.Count > 0) throw new InvalidDataException("候选全局资源配置仍引用此附加包，请先检查游戏设置。");
+        var dependents = BedrockAddonDependents.Check(globalRoots, source, uuid);
+        if (!dependents.Complete) throw new InvalidDataException("部分附加包无法识别，不能完整检查反向依赖。");
+        if (dependents.Dependents.Count > 0) throw new InvalidDataException("所选范围中有附加包声明依赖此 UUID；不区分启用状态和版本，不能自动移除：" +
+            string.Join("；", dependents.Dependents.Take(5).Select(item => item.Addon.Path)) +
+            (dependents.Dependents.Count > 5 ? "；还有其他依赖项。" : ""));
     }
 
     public static string Restore(BedrockDataRoot root, string transaction, IReadOnlyList<BedrockDataRoot> scope) {

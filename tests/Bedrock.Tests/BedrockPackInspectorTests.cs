@@ -494,6 +494,40 @@ public sealed class BedrockPackInspectorTests {
         } finally { TestPaths.DeleteFixture(fixture); }
     }
 
+    public void RefusesRemovalWhenAnotherPackDeclaresDependency() {
+        string fixture = Path.Combine(Path.GetTempPath(), "pcl-addon-dependent-test-" + Guid.NewGuid().ToString("N"));
+        string shared = Path.Combine(fixture, "shared"), account = Path.Combine(fixture, "account"), backup = Path.Combine(fixture, "backup");
+        string selectedPath = Path.Combine(shared, "resource_packs", "target"), dependentPath = Path.Combine(account, "behavior_packs", "dependent");
+        Directory.CreateDirectory(selectedPath); Directory.CreateDirectory(dependentPath);
+        Directory.CreateDirectory(Path.Combine(account, "minecraftWorlds")); Directory.CreateDirectory(backup);
+        try {
+            File.WriteAllText(Path.Combine(selectedPath, "manifest.json"), Manifest);
+            string dependent = Manifest.Replace("11111111-1111-4111-8111-111111111111", "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
+                .Replace("\"type\":\"resources\"", "\"type\":\"data\"")
+                .Replace("{\"module_name\":\"@minecraft/server\",\"version\":\"1.2.0\"}", "{\"uuid\":\"11111111-1111-4111-8111-111111111111\",\"version\":[9,0,0]}");
+            string dependentManifest = Path.Combine(dependentPath, "manifest.json");
+            File.WriteAllText(dependentManifest, dependent);
+            var target = new BedrockDataRoot(shared, "shared", false);
+            var accountRoot = new BedrockDataRoot(account, "account");
+            var result = BedrockAddonDependents.Check([target, accountRoot], selectedPath, Guid.Parse("11111111-1111-4111-8111-111111111111"));
+            Check(result.Complete && result.Dependents.Single().Addon.Path == dependentPath, "cross-root dependent missing");
+            try {
+                BedrockAddonRemoval.Remove(target, BedrockAddonCatalog.Read(target).Single(), BedrockDirectoryInstaller.Preview(selectedPath), backup,
+                    [accountRoot], [target, accountRoot]);
+                throw new Exception("dependent package was ignored");
+            } catch (InvalidDataException ex) { Check(ex.Message.Contains("依赖"), "dependent was not explained"); }
+            Check(Directory.Exists(selectedPath) && !Directory.EnumerateFileSystemEntries(backup).Any(), "dependent check changed data");
+            File.WriteAllText(dependentManifest, dependent.Replace("\"dependencies\":[{\"uuid\":\"11111111-1111-4111-8111-111111111111\",\"version\":[9,0,0]}]", "\"dependencies\":[]"));
+            Directory.CreateDirectory(Path.Combine(account, "resource_packs", "unknown"));
+            try {
+                BedrockAddonRemoval.Remove(target, BedrockAddonCatalog.Read(target).Single(), BedrockDirectoryInstaller.Preview(selectedPath), backup,
+                    [accountRoot], [target, accountRoot]);
+                throw new Exception("incomplete reverse dependency scan was accepted");
+            } catch (InvalidDataException) { }
+            Check(Directory.Exists(selectedPath) && !Directory.EnumerateFileSystemEntries(backup).Any(), "incomplete scan changed data");
+        } finally { TestPaths.DeleteFixture(fixture); }
+    }
+
     public void RemovesAndRestoresBehaviorPack() {
         string fixture = Path.Combine(Path.GetTempPath(), "pcl-bedrock-behavior-remove-test-" + Guid.NewGuid().ToString("N"));
         string game = Path.Combine(fixture, "game"), backup = Path.Combine(fixture, "backup");
