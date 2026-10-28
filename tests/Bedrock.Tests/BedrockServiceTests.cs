@@ -24,6 +24,7 @@ public class BedrockServiceTests {
             worldTests.CreatesAndVerifiesBackupWithoutChangingWorld,
             worldTests.BacksUpHighlyCompressibleWorldData,
             worldTests.PreservesPartialBackupWhenWorldCannotBeBackedUp,
+            worldTests.RejectsWorldChangesBeforeBackupCompletion,
             worldTests.RejectsBackupInsideGameData,
             worldTests.RefusesToOverwriteExistingBackup,
             worldTests.RestoresAsNewWithoutOverwritingOriginal,

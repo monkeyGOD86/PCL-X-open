@@ -73,6 +73,30 @@ public sealed class BedrockWorldReaderTests {
         } finally { TestPaths.DeleteFixture(fixture); }
     }
 
+    public void RejectsWorldChangesBeforeBackupCompletion() {
+        string fixture = Path.Combine(Path.GetTempPath(), "pcl-world-mutation-test-" + Guid.NewGuid().ToString("N"));
+        string root = Path.Combine(fixture, "game"), world = Path.Combine(root, "minecraftWorlds", "world");
+        Directory.CreateDirectory(world);
+        try {
+            string level = Path.Combine(world, "level.dat");
+            var rootInfo = new BedrockDataRoot(root, "fixture");
+            var worldInfo = new BedrockWorldInfo(world, "fixture", true, [], [], null);
+            foreach (bool changeContent in new[] { true, false }) {
+                File.WriteAllText(level, "original");
+                string output = Path.Combine(fixture, changeContent ? "content.zip" : "directory.zip");
+                try {
+                    BedrockWorldBackup.Create(rootInfo, worldInfo, output, () => {
+                        if (changeContent) File.WriteAllText(level, "modified"); // Same length as original.
+                        else Directory.CreateDirectory(Path.Combine(world, "new-directory"));
+                    });
+                    throw new Exception("world changed during backup but was accepted");
+                } catch (IOException ex) { Check(ex.Message.Contains("临时文件"), "partial backup path not reported"); }
+                Check(!File.Exists(output) && Directory.GetFiles(fixture, Path.GetFileName(output) + ".partial-*").Length == 1,
+                    "changed world produced a completed backup or lost partial file");
+            }
+        } finally { TestPaths.DeleteFixture(fixture); }
+    }
+
     public void RejectsBackupInsideGameData() => WithWorld((_, root, world) => {
         File.WriteAllText(Path.Combine(world, "level.dat"), "fixture");
         var info = new BedrockWorldInfo(world, "Test", true, [], [], null);

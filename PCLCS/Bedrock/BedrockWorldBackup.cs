@@ -16,7 +16,10 @@ public static class BedrockWorldBackup {
     private const int MaxFiles = 50000;
     private const string ManifestName = "_pcl_backup/manifest.json";
 
-    public static BedrockBackupInfo Create(BedrockDataRoot root, BedrockWorldInfo world, string destination) {
+    public static BedrockBackupInfo Create(BedrockDataRoot root, BedrockWorldInfo world, string destination) =>
+        Create(root, world, destination, null);
+
+    internal static BedrockBackupInfo Create(BedrockDataRoot root, BedrockWorldInfo world, string destination, Action? beforeSourceVerification) {
         if (!root.SupportsWorlds) throw new InvalidDataException("共享内容目录不是用户世界目录。");
         string worldRoot = Path.GetFullPath(Path.Combine(root.Path, "minecraftWorlds"));
         string worldPath = Path.GetFullPath(world.Path).TrimEnd(Path.DirectorySeparatorChar);
@@ -88,6 +91,8 @@ public static class BedrockWorldBackup {
                 using var writer = new StreamWriter(archive.CreateEntry(ManifestName).Open(), new UTF8Encoding(false));
                 writer.Write(manifest.ToString(Formatting.None));
             }
+            beforeSourceVerification?.Invoke();
+            VerifySource(worldPath, entries, directories);
             var verified = Verify(temporary);
             File.Move(temporary, output); // CreateNew semantics: no overwrite.
             return verified;
@@ -95,6 +100,49 @@ public static class BedrockWorldBackup {
             // Do not delete a path another process might have replaced after the stream closed.
             throw new IOException("世界备份未完成：" + ex.Message + "；临时文件保留供检查：" + temporary, ex);
         }
+    }
+
+    private static void VerifySource(string worldPath, JArray files, JArray directories) {
+        BedrockDataRootFinder.EnsureNoReparsePoints(worldPath);
+        var expectedFiles = files.Cast<JObject>().ToDictionary(item => item.Value<string>("path")!, StringComparer.OrdinalIgnoreCase);
+        var expectedDirectories = new HashSet<string>(directories.Select(item => item.Value<string>()!), StringComparer.OrdinalIgnoreCase);
+        var seenFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var seenDirectories = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var pending = new Stack<(string Path, int Depth)>();
+        pending.Push((worldPath, 0));
+        while (pending.Count > 0) {
+            var (folder, depth) = pending.Pop();
+            if (depth > 64) throw new IOException("世界目录在备份期间发生变化。");
+            foreach (string path in Directory.EnumerateFileSystemEntries(folder)) {
+                var attributes = File.GetAttributes(path);
+                if ((attributes & FileAttributes.ReparsePoint) != 0) throw new IOException("世界包含链接或重解析点。");
+                string relative = path.Substring(worldPath.Length + 1).Replace('\\', '/');
+                ValidateRelative(relative);
+                if ((attributes & FileAttributes.Directory) != 0) {
+                    if (!expectedDirectories.Contains(relative) || !seenDirectories.Add(relative)) throw new IOException("世界目录在备份期间发生变化。");
+                    pending.Push((path, depth + 1));
+                } else {
+                    if (!expectedFiles.TryGetValue(relative, out var expected) || !seenFiles.Add(relative)) throw new IOException("世界文件在备份期间发生变化。");
+                    using var file = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+                    long length = expected.Value<long>("size");
+                    if (file.Length != length) throw new IOException("世界文件在备份期间发生变化。");
+                    using var hash = SHA256.Create();
+                    byte[] buffer = new byte[65536];
+                    long actual = 0;
+                    int read;
+                    while ((read = file.Read(buffer, 0, buffer.Length)) > 0) {
+                        actual += read;
+                        if (actual > length) throw new IOException("世界文件在备份期间发生变化。");
+                        hash.TransformBlock(buffer, 0, read, null, 0);
+                    }
+                    hash.TransformFinalBlock([], 0, 0);
+                    if (actual != length || !string.Equals(Hex(hash.Hash!), expected.Value<string>("sha256"), StringComparison.OrdinalIgnoreCase))
+                        throw new IOException("世界文件在备份期间发生变化。");
+                }
+            }
+        }
+        if (seenFiles.Count != expectedFiles.Count || seenDirectories.Count != expectedDirectories.Count)
+            throw new IOException("世界内容在备份期间发生变化。");
     }
 
     public static BedrockBackupInfo Verify(string backupPath) {
