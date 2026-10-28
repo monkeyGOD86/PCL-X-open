@@ -12,6 +12,11 @@ public sealed class BedrockDependencyReport(IReadOnlyList<BedrockDependencyResul
 
 /// <summary>Checks declared pack UUIDs across selected local roots; it does not resolve platform modules or activate dependencies.</summary>
 public static class BedrockDependencyCheck {
+    public static bool Equivalent(BedrockDependencyReport left, BedrockDependencyReport right) =>
+        left.IncompleteRoots.OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
+            .SequenceEqual(right.IncompleteRoots.OrderBy(path => path, StringComparer.OrdinalIgnoreCase), StringComparer.OrdinalIgnoreCase) &&
+        left.Results.Select(item => (item.Dependency, item.Status)).SequenceEqual(right.Results.Select(item => (item.Dependency, item.Status)));
+
     public static BedrockDependencyReport Analyze(BedrockPackInfo pack, IReadOnlyList<BedrockDataRoot> roots) => Analyze(pack, roots, []);
 
     public static BedrockDependencyReport Analyze(BedrockPackInfo pack, IReadOnlyList<BedrockDataRoot> roots,

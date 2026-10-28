@@ -598,6 +598,14 @@ Public Class PageBedrockRight
             End If
             Dim Snapshot = Await Task.Run(Function() BedrockWorldPackEditor.Read(Root, World, Kind))
             Dim Report = Await Task.Run(Function() BedrockDependencyCheck.Analyze(Pack, Roots))
+            Dim WorldDependencies As BedrockWorldDependencyResult = Nothing
+            If Enable AndAlso Pack.Dependencies.Count > 0 Then
+                WorldDependencies = Await Task.Run(Function() BedrockWorldDependencyCheck.Check(Root, World, Pack))
+                Dim SelectedSnapshot = If(Kind = "resource", WorldDependencies.Resources, WorldDependencies.Behaviors)
+                If SelectedSnapshot.Exists <> Snapshot.Exists OrElse SelectedSnapshot.Hash <> Snapshot.Hash Then
+                    Throw New InvalidOperationException("世界配置已变化，请重新读取。")
+                End If
+            End If
             Dim Reverse As BedrockWorldDependentsResult = Nothing
             If Not Enable Then
                 Reverse = Await Task.Run(Function() BedrockWorldDependents.Check(Roots, Root, World, Pack.Uuid))
@@ -611,6 +619,11 @@ Public Class PageBedrockRight
                                     If(DependencyLines.Length > 12, vbCrLf & $"另有 {DependencyLines.Length - 12} 项未显示。", ""))
             If Choice.IsWorldReference Then DependencyText = "此条目仅来自世界配置，无法检查原包声明的依赖。"
             If Report.IncompleteRoots.Count > 0 Then DependencyText &= vbCrLf & "部分候选目录无法完整读取。"
+            If WorldDependencies IsNot Nothing Then
+                Dim WorldLines = WorldDependencies.Dependencies.Select(Function(Item) Item.Dependency & "：" & Item.Status).ToArray()
+                DependencyText &= vbCrLf & "世界配置中的依赖：" & vbCrLf & String.Join(vbCrLf, WorldLines.Take(12)) &
+                                  If(WorldLines.Length > 12, vbCrLf & $"另有 {WorldLines.Length - 12} 项未显示。", "")
+            End If
             If Reverse IsNot Nothing Then
                 DependencyText &= vbCrLf & "当前世界中声明依赖此 UUID 的包：" &
                                   If(Reverse.Dependents.Count = 0, "未发现可读取的匹配项。", vbCrLf &
@@ -655,6 +668,14 @@ Public Class PageBedrockRight
                                                     Dim CurrentPack = ValidateWorldAddon(Choice, CurrentRoots)
                                                     If CurrentPack.Fingerprint <> Preview.Fingerprint Then Throw New InvalidOperationException("附加包内容已变化，请重新确认。")
                                                     Pack = CurrentPack.Pack
+                                                End If
+                                                If Enable Then
+                                                    Dim CurrentReport = BedrockDependencyCheck.Analyze(Pack, CurrentRoots)
+                                                    If Not BedrockDependencyCheck.Equivalent(Report, CurrentReport) Then Throw New InvalidOperationException("附加包依赖检查结果已变化，请重新确认。")
+                                                    If WorldDependencies IsNot Nothing Then
+                                                        Dim CurrentWorldDependencies = BedrockWorldDependencyCheck.Check(Root, World, Pack)
+                                                        If Not BedrockWorldDependencyCheck.Equivalent(WorldDependencies, CurrentWorldDependencies) Then Throw New InvalidOperationException("世界依赖配置已变化，请重新确认。")
+                                                    End If
                                                 End If
                                                 Return BedrockWorldPackEditor.SetEnabled(Root, World, Snapshot, Pack, Enable, BackupParent)
                                             End Function)

@@ -133,6 +133,28 @@ public sealed class BedrockWorldPackEditorTests {
             File.ReadAllText(Path.Combine(restoreStage, "previous.json")) == "keep restore file", "restore overwrote existing data");
     });
 
+    public void ChecksWorldDependencyVersionsAndDetectsChanges() => WithFixture((root, world, _) => {
+        string resources = Path.Combine(world.Path, "world_resource_packs.json");
+        string behaviors = Path.Combine(world.Path, "world_behavior_packs.json");
+        string first = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", second = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+        string third = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+        File.WriteAllText(resources, "[{\"pack_id\":\"" + first + "\",\"version\":[1,2,3]}]");
+        File.WriteAllText(behaviors, "[{\"pack_id\":\"" + second + "\",\"version\":[4,0,0]}]");
+        var pack = new BedrockPackInfo("fixture", "", Pack.Uuid, "1.2.3", ["resources"],
+            [first + " 1.2.3", second + " 1.0.0", third + " 1.0.0", "@minecraft/server 1.2.0"], null);
+        var before = BedrockWorldDependencyCheck.Check(root, world, pack);
+        Check(before.Dependencies[0].Status.Contains("已列出") && before.Dependencies[0].Status.Contains("未验证"), "matching world reference not reported");
+        Check(before.Dependencies[1].Status.Contains("版本") && before.Dependencies[2].Status.Contains("未列出") &&
+            before.Dependencies[3].Status.Contains("无法验证"), "dependency mismatch or unknown module not reported");
+        File.WriteAllText(behaviors, "[{\"pack_id\":\"" + second + "\",\"version\":[4,0,0]}," +
+            "{\"pack_id\":\"" + first + "\",\"version\":[1,2,3]}]");
+        var after = BedrockWorldDependencyCheck.Check(root, world, pack);
+        Check(after.Dependencies[0].Status.Contains("重复") && !BedrockWorldDependencyCheck.Equivalent(before, after), "duplicate UUID or config change not detected");
+        var firstReport = new BedrockDependencyReport([new BedrockDependencyResult(first, "found")], [root.Path]);
+        var secondReport = new BedrockDependencyReport([new BedrockDependencyResult(first, "missing")], [root.Path]);
+        Check(!BedrockDependencyCheck.Equivalent(firstReport, secondReport), "installed dependency change was not detected");
+    });
+
     public void PreservesConcurrentChangesDuringConfigReplacement() => WithFixture((root, world, backup) => {
         string config = Path.Combine(world.Path, "world_resource_packs.json");
         File.WriteAllText(config, "[]");
