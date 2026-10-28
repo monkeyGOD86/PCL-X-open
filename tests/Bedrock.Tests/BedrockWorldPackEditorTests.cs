@@ -133,6 +133,39 @@ public sealed class BedrockWorldPackEditorTests {
             File.ReadAllText(Path.Combine(restoreStage, "previous.json")) == "keep restore file", "restore overwrote existing data");
     });
 
+    public void PreservesConcurrentChangesDuringConfigReplacement() => WithFixture((root, world, backup) => {
+        string config = Path.Combine(world.Path, "world_resource_packs.json");
+        File.WriteAllText(config, "[]");
+        var snapshot = BedrockWorldPackEditor.Read(root, world, "resource");
+        string? stage = null;
+        try {
+            BedrockWorldPackEditor.SetEnabled(root, world, snapshot, Pack, true, backup, path => {
+                stage = path;
+                File.WriteAllText(config, "[ ]");
+            });
+            throw new Exception("concurrent change was not reported");
+        } catch (IOException) { }
+        Check(stage is not null && File.ReadAllText(Path.Combine(stage, "original.json")) == "[ ]",
+            "concurrent original was not preserved");
+        Check(File.ReadAllText(config).Contains(Pack.Uuid.ToString()), "replacement state was not preserved for inspection");
+
+        File.WriteAllText(config, "[]");
+        snapshot = BedrockWorldPackEditor.Read(root, world, "resource");
+        var change = BedrockWorldPackEditor.SetEnabled(root, world, snapshot, Pack, true, backup);
+        string? restoreStage = null;
+        string concurrent = File.ReadAllText(config) + " ";
+        try {
+            BedrockWorldPackEditor.Restore(root, world, change.BackupPath!, path => {
+                restoreStage = path;
+                File.WriteAllText(config, concurrent);
+            });
+            throw new Exception("concurrent restore change was not reported");
+        } catch (IOException) { }
+        Check(restoreStage is not null && File.ReadAllText(Path.Combine(restoreStage, "previous.json")) == concurrent,
+            "concurrent restore state was not preserved");
+        Check(File.ReadAllText(config) == "[]", "restored state was not preserved for inspection");
+    });
+
     private static void WithFixture(Action<BedrockDataRoot, BedrockWorldInfo, string> run) {
         string fixture = Path.Combine(Path.GetTempPath(), "pcl-world-config-test-" + Guid.NewGuid().ToString("N"));
         string root = Path.Combine(fixture, "game"), world = Path.Combine(root, "minecraftWorlds", "test"), backup = Path.Combine(fixture, "backups");
