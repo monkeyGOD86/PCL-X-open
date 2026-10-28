@@ -158,6 +158,28 @@ public sealed class BedrockWorldPackEditorTests {
         Check(File.ReadAllText(Path.Combine(restored, "world_resource_packs.json")) == "[]", "backup included later edit");
     });
 
+    public void LocksAllCandidateRootsThroughWorldEdit() => WithFixture((root, world, backup) => {
+        string otherPath = Path.Combine(Path.GetDirectoryName(root.Path)!, "other");
+        Directory.CreateDirectory(otherPath);
+        var other = new BedrockDataRoot(otherPath, "fixture");
+        try { using var invalid = BedrockOperationScope.Acquire([root, root]); throw new Exception("duplicate roots accepted"); }
+        catch (InvalidDataException) { }
+        string config = Path.Combine(world.Path, "world_resource_packs.json");
+        File.WriteAllText(config, "[]");
+        var snapshot = BedrockWorldPackEditor.Read(root, world, "resource");
+        using var started = new ManualResetEventSlim();
+        Task? competitor = null;
+        bool blocked = false;
+        try {
+            using (BedrockOperationScope.Acquire([root, other])) {
+                competitor = Task.Run(() => { started.Set(); using var scope = BedrockOperationScope.Acquire([other, root]); });
+                blocked = started.Wait(TimeSpan.FromSeconds(10)) && !competitor.Wait(250);
+                BedrockWorldPackEditor.SetEnabled(root, world, snapshot, Pack, true, backup);
+            }
+        } finally { competitor?.Wait(); }
+        Check(blocked && File.ReadAllText(config).Contains(Pack.Uuid.ToString()), "candidate root lock did not serialize the world edit");
+    });
+
     public void SerializesWorldRestoreWithOtherRootOperations() => WithFixture((root, world, backup) => {
         string archive = Path.Combine(backup, "world.zip");
         BedrockWorldBackup.Create(root, world, archive);
