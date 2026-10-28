@@ -921,25 +921,29 @@ Public Class PageBedrockRight
         If Dialog.ShowDialog() = True Then PreviewPackage(Dialog.FileName)
     End Sub
 
-    Private Async Sub FolderClicked(sender As Object, e As EventArgs) Handles BtnFolder.Click
+    Private Sub FolderClicked(sender As Object, e As EventArgs) Handles BtnFolder.Click
         Using Dialog As New System.Windows.Forms.FolderBrowserDialog With {.Description = "选择包含 manifest.json 的附加包文件夹", .ShowNewFolderButton = False}
             If Dialog.ShowDialog() <> System.Windows.Forms.DialogResult.OK Then Return
-            Dim Folder = Dialog.SelectedPath
-            SelectedPackPath = Nothing
-            SetBusy(True)
-            LabPackInfo.Text = "正在检查附加包文件夹…"
-            Try
-                Dim Pack = Await Task.Run(Function() BedrockPackInspector.InspectDirectory(Folder))
-                SelectedPackPath = Folder
-                SelectedPackIsDirectory = True
-                LabPackInfo.Text = DescribePacks({Pack}) & vbCrLf & "已完成只读预览。实验性安装需先选择已验证的目标目录。"
-            Catch ex As Exception
-                LabPackInfo.Text = "无法预览附加包文件夹：" & ex.Message
-                Logger.Warn(ex, "基岩版附加包预览失败")
-            Finally
-                SetBusy(False)
-            End Try
+            PreviewPackageFolder(Dialog.SelectedPath)
         End Using
+    End Sub
+
+    Public Async Sub PreviewPackageFolder(Folder As String)
+        If IsBusy Then Return
+        SelectedPackPath = Nothing
+        SetBusy(True)
+        LabPackInfo.Text = "正在检查附加包文件夹…"
+        Try
+            Dim Pack = Await Task.Run(Function() BedrockPackInspector.InspectDirectory(Folder))
+            SelectedPackPath = Folder
+            SelectedPackIsDirectory = True
+            LabPackInfo.Text = DescribePacks({Pack}) & vbCrLf & "已完成只读预览。实验性安装需先选择已验证的目标目录。"
+        Catch ex As Exception
+            LabPackInfo.Text = "无法预览附加包文件夹：" & ex.Message
+            Logger.Warn(ex, "基岩版附加包预览失败")
+        Finally
+            SetBusy(False)
+        End Try
     End Sub
 
     Public Async Sub PreviewPackage(FilePath As String)

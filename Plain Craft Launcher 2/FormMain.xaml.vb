@@ -1036,6 +1036,10 @@ Public Class FormMain
     Private Sub FileDrag(FilePathList As IEnumerable(Of String))
         If PageCurrent = PageType.Bedrock AndAlso FrmBedrockRight IsNot Nothing Then
             Dim Files = FilePathList.ToList()
+            If Files.Count = 1 AndAlso Directory.Exists(Files(0)) Then
+                FrmBedrockRight.PreviewPackageFolder(Files(0))
+                Return
+            End If
             If Files.Count = 1 AndAlso {".mcpack", ".mcaddon"}.Contains(Path.GetExtension(Files(0)).ToLowerInvariant()) Then
                 FrmBedrockRight.PreviewPackage(Files(0))
                 Return
