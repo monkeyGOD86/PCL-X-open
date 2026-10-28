@@ -1375,24 +1375,42 @@ Public Class FormMain
 
     '引发实际页面切换的入口
     Private IsChangingPage As Boolean = False
+    ''' <summary>Build the optional Bedrock page before changing the active page or navigation stack.</summary>
+    Private Function EnsureBedrockPage() As Boolean
+        If FrmBedrockRight IsNot Nothing Then Return True
+        Try
+            FrmBedrockRight = New PageBedrockRight
+            Return True
+        Catch ex As Exception
+            Logger.Warn(ex, "初始化基岩版页面失败")
+            Hint("基岩版页面暂时无法打开，请查看日志。", HintType.Red)
+            Return False
+        End Try
+    End Function
+
+    Private Function MainTitleButton(Page As PageType) As MyRadioButton
+        Select Case Page
+            Case PageType.Launch : Return BtnTitleSelect0
+            Case PageType.Download : Return BtnTitleSelect1
+            Case PageType.Link : Return BtnTitleSelect2
+            Case PageType.Setup : Return BtnTitleSelect3
+            Case PageType.Other : Return BtnTitleSelect4
+            Case PageType.Bedrock : Return BtnTitleSelectBedrock
+            Case Else : Return Nothing
+        End Select
+    End Function
+
     ''' <summary>
     ''' 切换页面，并引起对应选择 UI 的改变。
     ''' </summary>
     Public Sub PageChange(Stack As PageStackData, Optional SubType As PageSubType = PageSubType.Default)
+        If Stack.Page = PageType.Bedrock AndAlso Not EnsureBedrockPage() Then Return
         If PageNameGet(Stack) = "" Then
             '切换到主页面
             PageChangeExit()
             IsChangingPage = True '防止下面的勾选直接触发了 PageChangeActual
-            Dim TitleButton As MyRadioButton
-            Select Case Stack.Page
-                Case PageType.Launch : TitleButton = BtnTitleSelect0
-                Case PageType.Download : TitleButton = BtnTitleSelect1
-                Case PageType.Link : TitleButton = BtnTitleSelect2
-                Case PageType.Setup : TitleButton = BtnTitleSelect3
-                Case PageType.Other : TitleButton = BtnTitleSelect4
-                Case PageType.Bedrock : TitleButton = BtnTitleSelectBedrock
-                Case Else : Throw New ArgumentException("未知的顶级页面：" & Stack.Page.ToString())
-            End Select
+            Dim TitleButton = MainTitleButton(Stack.Page)
+            If TitleButton Is Nothing Then Throw New ArgumentException("未知的顶级页面：" & Stack.Page.ToString())
             TitleButton.SetChecked(True, True, PageNameGet(PageCurrent) = "")
             IsChangingPage = False
             Select Case Stack.Page
@@ -1441,6 +1459,20 @@ Public Class FormMain
     ''' </summary>
     Private Sub PageChangeActual(Stack As PageStackData, Optional SubType As PageSubType = -1)
         If PageCurrent = Stack AndAlso (PageCurrentSub = SubType OrElse SubType = -1) Then Return
+        If Stack.Page = PageType.Bedrock AndAlso Not EnsureBedrockPage() Then
+            'A title click already selected Bedrock; keep the prior main page selected.
+            Dim PreviousButton = MainTitleButton(PageCurrent.Page)
+            If PreviousButton IsNot Nothing Then
+                Dim WasChanging = IsChangingPage
+                IsChangingPage = True
+                Try
+                    PreviousButton.SetChecked(True, False, False)
+                Finally
+                    IsChangingPage = WasChanging
+                End Try
+            End If
+            Return
+        End If
         If Stack.Page = PageType.InstanceSetup AndAlso PageInstanceLeft.Instance IsNot Nothing AndAlso McInstanceLock.IsLocked(PageInstanceLeft.Instance) Then
             Hint("该版本正在被修改，暂时无法进入版本设置！", HintType.Red)
             Return
@@ -1525,7 +1557,6 @@ Public Class FormMain
                 Case PageType.HelpDetail '帮助详情
                     PageChangeAnim(New MyPageLeft, Stack.Additional(1))
                 Case PageType.Bedrock
-                    If FrmBedrockRight Is Nothing Then FrmBedrockRight = New PageBedrockRight
                     PageChangeAnim(New MyPageLeft, FrmBedrockRight)
             End Select
 #End Region
