@@ -73,6 +73,10 @@ jobs:
     - name: Test Bedrock services
       run: dotnet run --project tests\Bedrock.Tests\Bedrock.Tests.csproj --configuration ${{ matrix.configuration }}
 
+    - name: Check launcher page compatibility
+      shell: powershell
+      run: .\tests\Bedrock.Compatibility\check-page-api.ps1 -ExecutablePath "Plain Craft Launcher 2\obj\${{ matrix.configuration }}\Plain Craft Launcher 2.exe" -FormXamlPath "Plain Craft Launcher 2\FormMain.xaml"
+
     - name: Build Bedrock compatibility probe
       run: dotnet build tools\bedrock-probe\PackProbe\PackProbe.csproj --configuration ${{ matrix.configuration }}
 
