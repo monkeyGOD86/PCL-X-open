@@ -406,6 +406,61 @@ public sealed class BedrockPackInspectorTests {
         } finally { TestPaths.DeleteFixture(fixture); }
     }
 
+    public void RestoresRemovedPackFromVerifiedExternalBackup() {
+        string fixture = Path.Combine(Path.GetTempPath(), "pcl-addon-backup-restore-test-" + Guid.NewGuid().ToString("N"));
+        string game = Path.Combine(fixture, "game"), backup = Path.Combine(fixture, "backup"), other = Path.Combine(fixture, "other");
+        string pack = Path.Combine(game, "resource_packs", "package", "1.2.3"), held = Path.Combine(fixture, "held");
+        Directory.CreateDirectory(pack); Directory.CreateDirectory(backup); Directory.CreateDirectory(other);
+        Directory.CreateDirectory(Path.Combine(game, "minecraftWorlds"));
+        try {
+            File.WriteAllText(Path.Combine(pack, "manifest.json"), Manifest);
+            File.WriteAllText(Path.Combine(pack, "payload.txt"), "original");
+            var root = new BedrockDataRoot(game, "fixture");
+            var otherRoot = new BedrockDataRoot(other, "other");
+            var removal = BedrockAddonRemoval.Remove(root, BedrockAddonCatalog.Read(root).Single(), BedrockDirectoryInstaller.Preview(pack), backup, [root]);
+            try { BedrockAddonRemoval.RestoreFromBackup(root, removal.TransactionPath, [root]); throw new Exception("existing quarantine was ignored"); }
+            catch (IOException) { }
+            Directory.Move(Path.Combine(removal.TransactionPath, "content"), held);
+            Check(BedrockAddonRemoval.List(root).Single().State == "内容缺失", "missing quarantine not reported");
+            string extra = Path.Combine(removal.BackupPath, "extra.txt");
+            File.WriteAllText(extra, "tampered");
+            try { BedrockAddonRemoval.RestoreFromBackup(root, removal.TransactionPath, [root]); throw new Exception("modified backup accepted"); }
+            catch (InvalidDataException) { }
+            File.Delete(extra);
+            string journalPath = Path.Combine(removal.TransactionPath, "journal.json");
+            string journal = File.ReadAllText(journalPath);
+            string fakeBackup = Path.Combine(game, Path.GetFileName(removal.BackupPath));
+            Directory.CreateDirectory(fakeBackup);
+            File.WriteAllText(Path.Combine(fakeBackup, "manifest.json"), Manifest);
+            File.WriteAllText(Path.Combine(fakeBackup, "payload.txt"), "original");
+            string altered = journal.Replace(removal.BackupPath.Replace("\\", "\\\\"), fakeBackup.Replace("\\", "\\\\"));
+            Check(altered != journal, "backup path substitution failed");
+            File.WriteAllText(journalPath, altered);
+            try { BedrockAddonRemoval.RestoreFromBackup(root, removal.TransactionPath, [root]); throw new Exception("backup inside game data accepted"); }
+            catch (InvalidDataException) { }
+            File.WriteAllText(journalPath, journal);
+            string duplicate = Path.Combine(other, "resource_packs", "duplicate");
+            Directory.CreateDirectory(duplicate); File.WriteAllText(Path.Combine(duplicate, "manifest.json"), Manifest);
+            try { BedrockAddonRemoval.RestoreFromBackup(root, removal.TransactionPath, [root, otherRoot]); throw new Exception("duplicate UUID accepted"); }
+            catch (InvalidDataException) { }
+            File.Delete(Path.Combine(duplicate, "manifest.json")); Directory.Delete(duplicate);
+            string? failedStage = null;
+            try {
+                BedrockAddonRemoval.RestoreFromBackup(root, removal.TransactionPath, [root, otherRoot], path => {
+                    failedStage = path;
+                    File.WriteAllText(Path.Combine(path, "changed.txt"), "preserve");
+                });
+                throw new Exception("modified recovery stage accepted");
+            } catch (IOException ex) { Check(ex.Message.Contains("暂存目录"), "recovery stage not reported"); }
+            Check(!Directory.Exists(pack) && failedStage is not null && File.Exists(Path.Combine(failedStage, "changed.txt")), "failed stage was lost");
+            string restored = BedrockAddonRemoval.RestoreFromBackup(root, removal.TransactionPath, [root, otherRoot]);
+            Check(restored == pack && File.ReadAllText(Path.Combine(restored, "payload.txt")) == "original" &&
+                File.ReadAllText(Path.Combine(removal.BackupPath, "payload.txt")) == "original" && Directory.Exists(held), "backup restore lost content");
+            try { BedrockAddonRemoval.RestoreFromBackup(root, removal.TransactionPath, [root]); throw new Exception("existing target overwritten"); }
+            catch (IOException) { }
+        } finally { TestPaths.DeleteFixture(fixture); }
+    }
+
     public void RefusesRestorationOverExistingOrModifiedPack() {
         string fixture = Path.Combine(Path.GetTempPath(), "pcl-bedrock-remove-test-" + Guid.NewGuid().ToString("N"));
         string game = Path.Combine(fixture, "game"), backup = Path.Combine(fixture, "backup"), pack = Path.Combine(game, "resource_packs", "package");

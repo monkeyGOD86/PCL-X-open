@@ -125,11 +125,74 @@ public static class BedrockAddonRemoval {
         using var rootLock = BedrockRootLock.AcquireAll(paths);
         var (stage, destination, uuid, record) = ReadJournal(rootPath, transaction);
         string relative = record.Value<string>("relativePath")!;
-        if (File.Exists(destination) || Directory.Exists(destination)) throw new IOException("原位置已被占用，不能覆盖。");
+        if (PathExists(destination)) throw new IOException("原位置已被占用，不能覆盖。");
         string parent = Path.GetDirectoryName(destination)!;
         BedrockDataRootFinder.EnsureNoReparsePoints(parent);
         string content = Path.Combine(stage, "content");
         Verify(content, uuid, record.Value<string>("version")!, record.Value<string>("fingerprint")!);
+        RequireRestoreAvailable(rootPath, destination, relative, uuid, scope);
+        BedrockDataRootFinder.EnsureNoReparsePoints(parent);
+        BedrockDataRootFinder.EnsureNoReparsePoints(content);
+        Directory.Move(content, destination);
+        try { Verify(destination, uuid, record.Value<string>("version")!, record.Value<string>("fingerprint")!); }
+        catch (Exception ex) { throw new IOException("恢复后的内容发生变化，请检查原位置与备份：" + destination, ex); }
+        return destination;
+    }
+
+    /// <summary>Copies a verified external backup through a new same-volume stage; never deletes the backup.</summary>
+    public static string RestoreFromBackup(BedrockDataRoot root, string transaction, IReadOnlyList<BedrockDataRoot> scope) =>
+        RestoreFromBackup(root, transaction, scope, null);
+
+    internal static string RestoreFromBackup(BedrockDataRoot root, string transaction, IReadOnlyList<BedrockDataRoot> scope, Action<string>? beforeMove) {
+        string rootPath = NormalizeRoot(root);
+        if (scope.Count is < 1 or > 128) throw new InvalidDataException("必须确认附加包冲突检查范围。");
+        string[] paths = scope.Select(NormalizeRoot).ToArray();
+        if (paths.Distinct(StringComparer.OrdinalIgnoreCase).Count() != paths.Length || !paths.Contains(rootPath, StringComparer.OrdinalIgnoreCase))
+            throw new InvalidDataException("检查范围必须包含所选目录且不能重复。");
+        using var rootLock = BedrockRootLock.AcquireAll(paths);
+        var (stage, destination, uuid, record) = ReadJournal(rootPath, transaction);
+        string relative = record.Value<string>("relativePath")!;
+        string content = Path.Combine(stage, "content");
+        if (PathExists(content)) throw new IOException("隔离内容仍存在，请使用常规恢复流程。");
+        string backupValue = record.Value<string>("backupPath") ?? "";
+        if (!Path.IsPathRooted(backupValue)) throw new InvalidDataException("外部备份路径无效。");
+        string backup = Path.GetFullPath(backupValue).TrimEnd(Path.DirectorySeparatorChar);
+        string id = record.Value<string>("id")!;
+        if (!string.Equals(backup, backupValue, StringComparison.OrdinalIgnoreCase) ||
+            !string.Equals(Path.GetFileName(backup), "pcl-addon-backup-" + id, StringComparison.OrdinalIgnoreCase) ||
+            paths.Any(path => Contains(path, backup) || Contains(backup, path)))
+            throw new InvalidDataException("外部备份位置不受支持或与游戏目录重叠。");
+        BedrockDataRootFinder.EnsureNoReparsePoints(backup);
+        string version = record.Value<string>("version")!, fingerprint = record.Value<string>("fingerprint")!;
+        Verify(backup, uuid, version, fingerprint);
+        RequireRestoreAvailable(rootPath, destination, relative, uuid, scope);
+        string recovery = Path.Combine(stage, "backup-recovery-" + Guid.NewGuid().ToString("N"));
+        if (PathExists(recovery)) throw new IOException("恢复暂存目录已存在，请重试。");
+        bool started = false;
+        try {
+            Directory.CreateDirectory(recovery);
+            started = true;
+            BedrockDirectoryInstaller.CopyTree(backup, recovery);
+            Verify(recovery, uuid, version, fingerprint);
+            Verify(backup, uuid, version, fingerprint);
+            beforeMove?.Invoke(recovery);
+            if (PathExists(content)) throw new IOException("隔离内容已出现，请重新检查。");
+            RequireRestoreAvailable(rootPath, destination, relative, uuid, scope);
+            BedrockDataRootFinder.EnsureNoReparsePoints(recovery);
+            BedrockDataRootFinder.EnsureNoReparsePoints(Path.GetDirectoryName(destination)!);
+            Verify(recovery, uuid, version, fingerprint);
+            Directory.Move(recovery, destination);
+            Verify(destination, uuid, version, fingerprint);
+            return destination;
+        } catch (Exception ex) when (started) {
+            throw new IOException("外部备份恢复未完成或需要检查；备份：" + backup + "，暂存目录：" + recovery + "，目标：" + destination, ex);
+        }
+    }
+
+    private static void RequireRestoreAvailable(string rootPath, string destination, string relative, Guid uuid, IReadOnlyList<BedrockDataRoot> scope) {
+        if (PathExists(destination)) throw new IOException("原位置已被占用，不能覆盖。");
+        string parent = Path.GetDirectoryName(destination)!;
+        BedrockDataRootFinder.EnsureNoReparsePoints(parent);
         // An emptied version-container is expected to be unrecognized after its only child is moved.
         bool emptyVersionContainer = relative.Split('/').Length == 3 && !File.Exists(Path.Combine(parent, "manifest.json")) &&
             !Directory.EnumerateDirectories(parent).Any();
@@ -142,12 +205,6 @@ public static class BedrockAddonRemoval {
                     string.Equals(Path.GetFullPath(item.Path), parent, StringComparison.OrdinalIgnoreCase))))
                 throw new InvalidDataException("现有包无法全部识别，无法检查冲突。");
         }
-        BedrockDataRootFinder.EnsureNoReparsePoints(parent);
-        BedrockDataRootFinder.EnsureNoReparsePoints(content);
-        Directory.Move(content, destination);
-        try { Verify(destination, uuid, record.Value<string>("version")!, record.Value<string>("fingerprint")!); }
-        catch (Exception ex) { throw new IOException("恢复后的内容发生变化，请检查原位置与备份：" + destination, ex); }
-        return destination;
     }
 
     private static (string Stage, string Destination, Guid Uuid, JObject Record) ReadJournal(string rootPath, string transaction) {
@@ -199,4 +256,9 @@ public static class BedrockAddonRemoval {
     }
     private static bool Contains(string parent, string path) => string.Equals(parent, path, StringComparison.OrdinalIgnoreCase) ||
         path.StartsWith(parent + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
+    private static bool PathExists(string path) {
+        try { _ = File.GetAttributes(path); return true; }
+        catch (FileNotFoundException) { return false; }
+        catch (DirectoryNotFoundException) { return false; }
+    }
 }

@@ -54,6 +54,7 @@ public class BedrockServiceTests {
             packTests.ReportsMissingAndChangedMembersDuringRollback,
             packTests.RejectsTamperedTransactionJournal,
             packTests.RemovesAndRestoresVersionedPackWithExternalBackup,
+            packTests.RestoresRemovedPackFromVerifiedExternalBackup,
             packTests.RefusesRestorationOverExistingOrModifiedPack,
             packTests.RejectsChangedRemovalAndTamperedRemovalJournal,
             packTests.RefusesRemovalWhenAccountWorldReferencesSharedPack,
