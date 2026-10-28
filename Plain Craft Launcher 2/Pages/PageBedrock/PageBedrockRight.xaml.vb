@@ -598,11 +598,27 @@ Public Class PageBedrockRight
             End If
             Dim Snapshot = Await Task.Run(Function() BedrockWorldPackEditor.Read(Root, World, Kind))
             Dim Report = Await Task.Run(Function() BedrockDependencyCheck.Analyze(Pack, Roots))
+            Dim Reverse As BedrockWorldDependentsResult = Nothing
+            If Not Enable Then
+                Reverse = Await Task.Run(Function() BedrockWorldDependents.Check(Roots, Root, World, Pack.Uuid))
+                Dim SelectedSnapshot = If(Kind = "resource", Reverse.Resources, Reverse.Behaviors)
+                If SelectedSnapshot.Exists <> Snapshot.Exists OrElse SelectedSnapshot.Hash <> Snapshot.Hash Then
+                    Throw New InvalidOperationException("世界配置已变化，请重新读取。")
+                End If
+            End If
             Dim DependencyLines = Report.Results.Select(Function(Item) Item.Dependency & "：" & Item.Status).ToArray()
             Dim DependencyText = If(DependencyLines.Length = 0, "无声明依赖。", String.Join(vbCrLf, DependencyLines.Take(12)) &
                                     If(DependencyLines.Length > 12, vbCrLf & $"另有 {DependencyLines.Length - 12} 项未显示。", ""))
             If Choice.IsWorldReference Then DependencyText = "此条目仅来自世界配置，无法检查原包声明的依赖。"
             If Report.IncompleteRoots.Count > 0 Then DependencyText &= vbCrLf & "部分候选目录无法完整读取。"
+            If Reverse IsNot Nothing Then
+                DependencyText &= vbCrLf & "当前世界中声明依赖此 UUID 的包：" &
+                                  If(Reverse.Dependents.Count = 0, "未发现可读取的匹配项。", vbCrLf &
+                                     String.Join(vbCrLf, Reverse.Dependents.Take(8).Select(Function(Item) Item.Addon.Manifest.DisplayName & " · " & Item.Addon.Path)) &
+                                     If(Reverse.Dependents.Count > 8, vbCrLf & $"另有 {Reverse.Dependents.Count - 8} 项未显示。", "")) &
+                                  vbCrLf & "按 UUID 保守匹配，未核验版本；缺失包和未发现目录的依赖无法确认。"
+                If Reverse.IncompleteRoots.Count > 0 Then DependencyText &= vbCrLf & "部分候选附加包无法读取，反向依赖检查不完整。"
+            End If
             Using Dialog As New System.Windows.Forms.FolderBrowserDialog With {.Description = "选择游戏数据目录之外的世界及配置备份文件夹", .ShowNewFolderButton = True}
                 If Dialog.ShowDialog() <> System.Windows.Forms.DialogResult.OK Then
                     LabWorldAddonStatus.Text = "已取消修改。"
@@ -631,6 +647,10 @@ Public Class PageBedrockRight
                                                 If IsKnownBedrockProcessRunning() Then Throw New InvalidOperationException("Minecraft 正在运行，请关闭后重试。")
                                                 Dim CurrentRoots = ValidateInstallTarget(Installation, Root)
                                                 If Not SameRoots(Roots, CurrentRoots) Then Throw New InvalidOperationException("数据目录范围已变化，请重新确认。")
+                                                If Reverse IsNot Nothing Then
+                                                    Dim CurrentReverse = BedrockWorldDependents.Check(CurrentRoots, Root, World, Pack.Uuid)
+                                                    If Not BedrockWorldDependents.Equivalent(Reverse, CurrentReverse) Then Throw New InvalidOperationException("世界配置或反向依赖已变化，请重新确认。")
+                                                End If
                                                 If Not Choice.IsWorldReference Then
                                                     Dim CurrentPack = ValidateWorldAddon(Choice, CurrentRoots)
                                                     If CurrentPack.Fingerprint <> Preview.Fingerprint Then Throw New InvalidOperationException("附加包内容已变化，请重新确认。")

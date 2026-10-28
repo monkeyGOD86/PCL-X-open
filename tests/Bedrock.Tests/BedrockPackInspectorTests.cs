@@ -494,6 +494,42 @@ public sealed class BedrockPackInspectorTests {
         } finally { TestPaths.DeleteFixture(fixture); }
     }
 
+    public void ChecksWorldDependentsAndDetectsLaterChanges() {
+        string fixture = Path.Combine(Path.GetTempPath(), "pcl-world-dependents-test-" + Guid.NewGuid().ToString("N"));
+        string account = Path.Combine(fixture, "account"), shared = Path.Combine(fixture, "shared");
+        string world = Path.Combine(account, "minecraftWorlds", "world"), enabled = Path.Combine(shared, "behavior_packs", "enabled");
+        string disabled = Path.Combine(shared, "behavior_packs", "disabled");
+        Directory.CreateDirectory(world); Directory.CreateDirectory(enabled); Directory.CreateDirectory(disabled);
+        try {
+            File.WriteAllText(Path.Combine(world, "level.dat"), "fixture");
+            string target = "11111111-1111-4111-8111-111111111111", enabledId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+            string dependency = "{\"uuid\":\"" + target + "\",\"version\":[9,0,0]}";
+            string manifest = Manifest.Replace(target, enabledId).Replace("\"type\":\"resources\"", "\"type\":\"data\"")
+                .Replace("{\"module_name\":\"@minecraft/server\",\"version\":\"1.2.0\"}", dependency);
+            File.WriteAllText(Path.Combine(enabled, "manifest.json"), manifest);
+            File.WriteAllText(Path.Combine(disabled, "manifest.json"), manifest.Replace(enabledId, "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"));
+            string behaviorConfig = Path.Combine(world, "world_behavior_packs.json");
+            File.WriteAllText(behaviorConfig, "[{\"pack_id\":\"" + enabledId + "\",\"version\":[4,0,0]}]");
+            File.WriteAllText(Path.Combine(world, "world_resource_packs.json"), "[{\"pack_id\":\"" + target + "\",\"version\":[1,2,3]}]");
+            var worldRoot = new BedrockDataRoot(account, "account");
+            var roots = new[] { worldRoot, new BedrockDataRoot(shared, "shared", false) };
+            var info = new BedrockWorldInfo(world, "fixture", true, [], [], null);
+            var before = BedrockWorldDependents.Check(roots, worldRoot, info, Guid.Parse(target));
+            Check(before.Dependents.Count == 1 && before.Dependents[0].Addon.Path == enabled && before.IncompleteRoots.Count == 0,
+                "enabled dependent was not found or disabled pack was included");
+            File.WriteAllText(behaviorConfig, "[]");
+            var after = BedrockWorldDependents.Check(roots, worldRoot, info, Guid.Parse(target));
+            Check(after.Dependents.Count == 0 && !BedrockWorldDependents.Equivalent(before, after), "world configuration change was missed");
+            File.WriteAllText(behaviorConfig, "[{\"pack_id\":\"" + enabledId + "\",\"version\":[4,0,0]}]");
+            File.WriteAllText(Path.Combine(enabled, "manifest.json"), manifest.Replace(dependency, "{\"module_name\":\"@minecraft/server\",\"version\":\"1.2.0\"}"));
+            after = BedrockWorldDependents.Check(roots, worldRoot, info, Guid.Parse(target));
+            Check(after.Dependents.Count == 0 && !BedrockWorldDependents.Equivalent(before, after), "dependency declaration change was missed");
+            Directory.CreateDirectory(Path.Combine(shared, "resource_packs", "unknown"));
+            after = BedrockWorldDependents.Check(roots, worldRoot, info, Guid.Parse(target));
+            Check(after.IncompleteRoots.Count == 1 && !BedrockWorldDependents.Equivalent(before, after), "incomplete scan was missed");
+        } finally { TestPaths.DeleteFixture(fixture); }
+    }
+
     public void RefusesRemovalWhenAnotherPackDeclaresDependency() {
         string fixture = Path.Combine(Path.GetTempPath(), "pcl-addon-dependent-test-" + Guid.NewGuid().ToString("N"));
         string shared = Path.Combine(fixture, "shared"), account = Path.Combine(fixture, "account"), backup = Path.Combine(fixture, "backup");
