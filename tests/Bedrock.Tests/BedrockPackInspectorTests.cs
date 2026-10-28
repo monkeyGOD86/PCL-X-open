@@ -570,6 +570,32 @@ public sealed class BedrockPackInspectorTests {
         } finally { TestPaths.DeleteFixture(fixture); }
     }
 
+    public void RejectsAmbiguousInstalledPackLayouts() {
+        string fixture = Path.Combine(Path.GetTempPath(), "pcl-addon-layout-test-" + Guid.NewGuid().ToString("N"));
+        string game = Path.Combine(fixture, "game"), source = Path.Combine(fixture, "source");
+        string container = Path.Combine(game, "resource_packs", "existing"), version = Path.Combine(container, "1.2.3");
+        string badManifest = Path.Combine(container, "manifest.json"), unknown = Path.Combine(container, "unrecognized");
+        Directory.CreateDirectory(version); Directory.CreateDirectory(source); Directory.CreateDirectory(badManifest);
+        try {
+            File.WriteAllText(Path.Combine(source, "manifest.json"), Manifest);
+            File.WriteAllText(Path.Combine(version, "manifest.json"), Manifest.Replace("11111111-1111-4111-8111-111111111111", "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"));
+            var root = new BedrockDataRoot(game, "fixture");
+            var preview = BedrockDirectoryInstaller.Preview(source);
+            Check(!BedrockAddonScope.Check([root], [preview.Pack.Uuid]).Complete, "directory in manifest position was ignored");
+            Directory.Delete(badManifest);
+            Directory.CreateDirectory(unknown);
+            Check(!BedrockAddonScope.Check([root], [preview.Pack.Uuid]).Complete, "unknown version directory was ignored");
+            try {
+                BedrockAddonTransaction.Prepare(root, [new BedrockPreparedPack(source, preview)], [root]);
+                throw new Exception("ambiguous installed package accepted");
+            } catch (InvalidDataException) { }
+            Check(Directory.Exists(unknown) && !Directory.EnumerateDirectories(game, ".pcl-addon-transaction-*").Any(),
+                "ambiguous scan changed existing files");
+            Directory.Delete(unknown);
+            Check(BedrockAddonScope.Check([root], [preview.Pack.Uuid]).Complete, "valid version container was rejected");
+        } finally { TestPaths.DeleteFixture(fixture); }
+    }
+
     public void RejectsInstallWhenPackCategoryIsNotDirectory() {
         string fixture = Path.Combine(Path.GetTempPath(), "pcl-addon-category-test-" + Guid.NewGuid().ToString("N"));
         string game = Path.Combine(fixture, "game"), source = Path.Combine(fixture, "source");

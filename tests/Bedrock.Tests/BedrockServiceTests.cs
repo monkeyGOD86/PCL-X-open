@@ -60,6 +60,7 @@ public class BedrockServiceTests {
             packTests.RemovesAndRestoresBehaviorPack,
             packTests.RefusesRemovalForCandidateGlobalReferencesAndInvalidConfig,
             packTests.RejectsInstallWhenPackCategoryIsNotDirectory,
+            packTests.RejectsAmbiguousInstalledPackLayouts,
             packTests.ChecksConflictsAcrossExplicitRootsAndReportsIncompleteScan,
             packTests.ChecksDependenciesAcrossRootsWithoutClaimingWorldActivation,
             packTests.TransactionRechecksCrossRootScopeBeforeCommit,

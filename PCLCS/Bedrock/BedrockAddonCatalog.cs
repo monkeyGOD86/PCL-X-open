@@ -32,7 +32,7 @@ public static class BedrockAddonCatalog {
                 try {
                     BedrockDataRootFinder.EnsureNoReparsePoints(path);
                     string manifestPath = System.IO.Path.Combine(path, "manifest.json");
-                    if (File.Exists(manifestPath)) {
+                    if (ManifestIsPresent(manifestPath)) {
                         AddPackage(result, path, label);
                     } else {
                         // Current Windows installs can use <pack>/<version>/manifest.json.
@@ -41,7 +41,8 @@ public static class BedrockAddonCatalog {
                         foreach (string child in Directory.EnumerateDirectories(path)) {
                             if (++children > 128 || result.Count >= 4096) throw new InvalidDataException("附加包版本数量超过读取限制。");
                             BedrockDataRootFinder.EnsureNoReparsePoints(child);
-                            if (File.Exists(System.IO.Path.Combine(child, "manifest.json"))) AddPackage(result, child, label);
+                            if (ManifestIsPresent(System.IO.Path.Combine(child, "manifest.json"))) AddPackage(result, child, label);
+                            else result.Add(new(child, label, null, "无法读取或识别包清单。"));
                         }
                         if (result.Count == before) result.Add(new(path, label, null, "无法读取或识别包清单。"));
                     }
@@ -82,6 +83,16 @@ public static class BedrockAddonCatalog {
         if ((File.GetAttributes(path) & FileAttributes.Directory) == 0)
             throw new InvalidDataException("数据目录不可用，无法完整检查附加包。");
         BedrockDataRootFinder.EnsureNoReparsePoints(path);
+    }
+
+    private static bool ManifestIsPresent(string path) {
+        FileAttributes attributes;
+        try { attributes = File.GetAttributes(path); }
+        catch (FileNotFoundException) { return false; }
+        catch (DirectoryNotFoundException) { return false; }
+        if ((attributes & (FileAttributes.Directory | FileAttributes.ReparsePoint)) != 0)
+            throw new InvalidDataException("附加包清单路径不是普通文件。");
+        return true;
     }
 
     private static void AddPackage(List<BedrockInstalledAddon> result, string path, string label) {
