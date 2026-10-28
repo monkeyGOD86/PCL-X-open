@@ -46,7 +46,7 @@ Public Class PageBedrockRight
             Dim Result = Await Task.Run(Function() Service.Detect())
             ComboInstall.Items.Clear()
             LabDetails.Text = ""
-            If Result.Error IsNot Nothing Then
+            If Result.Installations.Count = 0 AndAlso Result.Error IsNot Nothing Then
                 LabStatus.Text = "无法读取游戏安装状态：" & Result.Error
             ElseIf Result.Installations.Count = 0 Then
                 LabStatus.Text = "未发现受支持的基岩版安装。请通过 Microsoft Store 或 Xbox 应用安装游戏后刷新。"
@@ -58,7 +58,8 @@ Public Class PageBedrockRight
                     })
                 Next
                 ComboInstall.SelectedIndex = 0
-                LabStatus.Text = "已发现 " & Result.Installations.Count & " 个已注册的游戏安装。"
+                LabStatus.Text = "已发现 " & Result.Installations.Count & " 个已注册的游戏安装。" &
+                                 If(Result.Error Is Nothing, "", vbCrLf & "部分安装状态无法查询：" & Result.Error & vbCrLf & "部分数据操作需要完整检测，请刷新后重试。")
             End If
         Catch ex As Exception
             LabStatus.Text = "检查安装状态失败：" & ex.Message
@@ -763,9 +764,10 @@ Public Class PageBedrockRight
     End Sub
 
     Private Async Sub RestoreClicked(sender As Object, e As EventArgs) Handles BtnRestore.Click
+        Dim Installation = TryCast(TryCast(ComboInstall.SelectedItem, MyComboBoxItem)?.Tag, BedrockInstallation)
         Dim RootItem = TryCast(ComboRoots.SelectedItem, MyComboBoxItem)
         Dim Root = TryCast(RootItem?.Tag, BedrockDataRoot)
-        If IsBusy OrElse Root Is Nothing Then Return
+        If IsBusy OrElse Installation Is Nothing OrElse Root Is Nothing Then Return
         If IsKnownBedrockProcessRunning() Then
             MyMsgBox("请先关闭 Minecraft 基岩版，再恢复世界。", "恢复世界")
             Return
@@ -778,6 +780,7 @@ Public Class PageBedrockRight
         SetBusy(True)
         LabWorldStatus.Text = "正在校验备份…"
         Try
+            Dim Roots = Await Task.Run(Function() ValidateInstallTarget(Installation, Root))
             Dim Info = Await Task.Run(Function() BedrockWorldBackup.Verify(BackupPath))
             If MyMsgBox("请确认 Minecraft 已关闭且存档同步已完成。" & vbCrLf & vbCrLf &
                         "目标数据目录：" & Root.Path & vbCrLf & $"备份世界：{Info.WorldName}（{Info.Files} 个文件）" & vbCrLf &
@@ -788,6 +791,8 @@ Public Class PageBedrockRight
             LabWorldStatus.Text = "正在恢复并校验世界…"
             Dim Restored = Await Task.Run(Function()
                                               If IsKnownBedrockProcessRunning() Then Throw New InvalidOperationException("Minecraft 正在运行，请关闭后重试。")
+                                              Dim CurrentRoots = ValidateInstallTarget(Installation, Root)
+                                              If Not SameRoots(Roots, CurrentRoots) Then Throw New InvalidOperationException("数据目录范围已变化，请重新确认。")
                                               Return BedrockWorldBackup.RestoreAsNew(Root, BackupPath)
                                           End Function)
             LabWorldStatus.Text = "已恢复为新世界。请重新读取世界列表，并在游戏中确认。目录：" & Restored

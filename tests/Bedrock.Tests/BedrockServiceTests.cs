@@ -10,6 +10,7 @@ public class BedrockServiceTests {
         var worldTests = new BedrockWorldReaderTests();
         var worldPackTests = new BedrockWorldPackEditorTests();
         Action[] cases = [tests.DetectionDistinguishesNoInstallationFromQueryFailure,
+            tests.ChannelFailureKeepsVerifiedInstallationAvailable,
             tests.LaunchRejectsRegistrationChangedSinceSelection,
             tests.LaunchRevalidatesAndPassesTheRegisteredApplicationToWindows,
             tests.UnsupportedApplicationIsNotActivated,
@@ -93,6 +94,36 @@ public class BedrockServiceTests {
         Assert.Contains("5", failure.Error);
     }
 
+    public void ChannelFailureKeepsVerifiedInstallationAvailable() {
+        var selected = Installation();
+        var partial = WindowsBedrockPackageCatalog.CollectChannels((_, channel) =>
+            channel == "正式版" ? [selected] : throw new Win32Exception(5));
+        Assert.Equal(1, partial.Installations.Count);
+        Assert.Contains("预览版", partial.Error);
+        var catalog = new DiagnosticCatalog { Result = partial };
+        var activator = new FakeActivator { ProcessId = 123 };
+        var service = new BedrockService(catalog, activator);
+        Assert.Contains("预览版", service.Detect().Error);
+        Assert.True(service.Launch(selected).Accepted);
+        Assert.Equal("family!Game", activator.LastId);
+        var unconfirmed = service.Launch(Installation("other"));
+        Assert.False(unconfirmed.Accepted);
+        Assert.Contains("无法重新确认", unconfirmed.Error);
+        var failed = WindowsBedrockPackageCatalog.CollectChannels((_, _) => throw new Win32Exception(5));
+        Assert.Empty(failed.Installations);
+        Assert.Contains("正式版", failed.Error);
+        Assert.Contains("预览版", failed.Error);
+        IEnumerable<BedrockInstallation> Incomplete() {
+            yield return Installation("unconfirmed");
+            throw new Win32Exception(5);
+        }
+        var interrupted = WindowsBedrockPackageCatalog.CollectChannels((_, channel) =>
+            channel == "正式版" ? [selected] : Incomplete());
+        Assert.Equal(1, interrupted.Installations.Count);
+        Assert.Equal("package-v1", interrupted.Installations[0].PackageFullName);
+        Assert.Contains("预览版", interrupted.Error);
+    }
+
     public void LaunchRejectsRegistrationChangedSinceSelection() {
         var catalog = new FakeCatalog { Installations = [Installation("package-v2")] };
         var activator = new FakeActivator();
@@ -131,6 +162,12 @@ public class BedrockServiceTests {
         public IReadOnlyList<BedrockInstallation> Installations { get; set; } = [];
         public Exception? Failure { get; set; }
         public IReadOnlyList<BedrockInstallation> FindInstalled() => Failure is null ? Installations : throw Failure;
+    }
+
+    private sealed class DiagnosticCatalog : IBedrockPackageCatalog, IBedrockCatalogDiagnostics {
+        public BedrockDetectionResult Result { get; set; } = new([], null);
+        public BedrockDetectionResult DetectInstalled() => Result;
+        public IReadOnlyList<BedrockInstallation> FindInstalled() => throw new Exception("diagnostics was not used");
     }
 
     private sealed class FakeActivator : IBedrockActivator {

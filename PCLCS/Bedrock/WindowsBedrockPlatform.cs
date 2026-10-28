@@ -5,7 +5,7 @@ using System.Text;
 namespace PCLCS.Bedrock;
 
 /// <summary>Uses Windows package registration for the current user; it never reads credentials.</summary>
-public sealed class WindowsBedrockPackageCatalog : IBedrockPackageCatalog {
+public sealed class WindowsBedrockPackageCatalog : IBedrockPackageCatalog, IBedrockCatalogDiagnostics {
     private const int InsufficientBuffer = 122;
     private static readonly (string Family, string Channel)[] Families = [
         ("Microsoft.MinecraftUWP_8wekyb3d8bbwe", "正式版"),
@@ -13,22 +13,42 @@ public sealed class WindowsBedrockPackageCatalog : IBedrockPackageCatalog {
     ];
 
     public IReadOnlyList<BedrockInstallation> FindInstalled() {
-        var results = new List<BedrockInstallation>();
+        var result = DetectInstalled();
+        if (result.Error is not null) throw new InvalidOperationException(result.Error);
+        return result.Installations;
+    }
+
+    public BedrockDetectionResult DetectInstalled() {
         string gamingServices = GetGamingServicesState();
+        return CollectChannels((family, channel) => FindFamily(family, channel, gamingServices));
+    }
+
+    internal static BedrockDetectionResult CollectChannels(Func<string, string, IEnumerable<BedrockInstallation>> query) {
+        var results = new List<BedrockInstallation>();
+        var errors = new List<string>();
         foreach (var (family, channel) in Families) {
-            foreach (string fullName in GetPackageNames(family)) {
-                var identity = GetIdentity(fullName);
-                bool recognized = false;
-                foreach (string aumid in GetApplicationIds(fullName)) {
-                    // Game is the current GDK entry; App is used by older UWP packages.
-                    if (!string.Equals(aumid, family + "!Game", StringComparison.OrdinalIgnoreCase) &&
-                        !string.Equals(aumid, family + "!App", StringComparison.OrdinalIgnoreCase)) continue;
-                    recognized = true;
-                    results.Add(new(family, fullName, aumid, identity.Version, identity.Architecture,
-                        channel, GetRuntimeEvidence(fullName), gamingServices));
-                }
-                if (!recognized) results.Add(new(family, fullName, "", identity.Version, identity.Architecture, channel, "入口不受支持", gamingServices));
+            try { results.AddRange(query(family, channel).ToArray()); }
+            catch (Exception ex) when (BedrockService.IsPlatformError(ex)) {
+                errors.Add(channel + "查询失败：" + ex.Message);
             }
+        }
+        return new(results, errors.Count == 0 ? null : string.Join("；", errors));
+    }
+
+    private static IEnumerable<BedrockInstallation> FindFamily(string family, string channel, string gamingServices) {
+        var results = new List<BedrockInstallation>();
+        foreach (string fullName in GetPackageNames(family)) {
+            var identity = GetIdentity(fullName);
+            bool recognized = false;
+            foreach (string aumid in GetApplicationIds(fullName)) {
+                // Game is the current GDK entry; App is used by older UWP packages.
+                if (!string.Equals(aumid, family + "!Game", StringComparison.OrdinalIgnoreCase) &&
+                    !string.Equals(aumid, family + "!App", StringComparison.OrdinalIgnoreCase)) continue;
+                recognized = true;
+                results.Add(new(family, fullName, aumid, identity.Version, identity.Architecture,
+                    channel, GetRuntimeEvidence(fullName), gamingServices));
+            }
+            if (!recognized) results.Add(new(family, fullName, "", identity.Version, identity.Architecture, channel, "入口不受支持", gamingServices));
         }
         return results;
     }

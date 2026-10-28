@@ -32,6 +32,11 @@ public interface IBedrockPackageCatalog {
     IReadOnlyList<BedrockInstallation> FindInstalled();
 }
 
+/// <summary>Reports partial results when independently queried channels fail.</summary>
+public interface IBedrockCatalogDiagnostics {
+    BedrockDetectionResult DetectInstalled();
+}
+
 public interface IBedrockActivator {
     uint Activate(string appUserModelId);
 }
@@ -39,7 +44,7 @@ public interface IBedrockActivator {
 public sealed class BedrockService(IBedrockPackageCatalog catalog, IBedrockActivator activator) {
     public BedrockDetectionResult Detect() {
         try {
-            return new(catalog.FindInstalled(), null);
+            return catalog is IBedrockCatalogDiagnostics diagnostics ? diagnostics.DetectInstalled() : new(catalog.FindInstalled(), null);
         } catch (Exception ex) when (IsPlatformError(ex)) {
             return new([], Describe(ex));
         }
@@ -50,18 +55,19 @@ public sealed class BedrockService(IBedrockPackageCatalog catalog, IBedrockActiv
         if (!selected.CanLaunch) return new(false, "此安装的应用入口尚不受支持。");
         try {
             // A previously selected registration can disappear or change after a Store update.
-            var current = catalog.FindInstalled().FirstOrDefault(candidate =>
+            var detection = Detect();
+            var current = detection.Installations.FirstOrDefault(candidate =>
                 string.Equals(candidate.FamilyName, selected.FamilyName, StringComparison.OrdinalIgnoreCase) &&
                 string.Equals(candidate.PackageFullName, selected.PackageFullName, StringComparison.OrdinalIgnoreCase) &&
                 string.Equals(candidate.AppUserModelId, selected.AppUserModelId, StringComparison.OrdinalIgnoreCase));
-            if (current is null) return new(false, "安装状态已更改，请刷新后重新选择。");
+            if (current is null) return new(false, detection.Error is null ? "安装状态已更改，请刷新后重新选择。" : "无法重新确认安装状态：" + detection.Error);
             return new(true, null, activator.Activate(current.AppUserModelId));
         } catch (Exception ex) when (IsPlatformError(ex)) {
             return new(false, Describe(ex));
         }
     }
 
-    private static bool IsPlatformError(Exception ex) => ex is Win32Exception or UnauthorizedAccessException or
+    internal static bool IsPlatformError(Exception ex) => ex is Win32Exception or UnauthorizedAccessException or
         System.Runtime.InteropServices.COMException or PlatformNotSupportedException or DllNotFoundException or
         EntryPointNotFoundException or InvalidOperationException or System.IO.IOException;
 
