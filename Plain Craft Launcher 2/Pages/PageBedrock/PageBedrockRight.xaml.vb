@@ -669,12 +669,7 @@ Public Class PageBedrockRight
                     Return
                 End If
                 FullBackup = Path.Combine(BackupParent, "PCL-WorldBeforePack-" & Guid.NewGuid().ToString("N") & ".zip")
-                LabWorldAddonStatus.Text = "正在备份并校验整个世界…"
-                Await Task.Run(Sub()
-                                   If IsKnownBedrockProcessRunning() Then Throw New InvalidOperationException("Minecraft 正在运行，请关闭后重试。")
-                                   BedrockWorldBackup.Create(Root, World, FullBackup, Roots)
-                               End Sub)
-                LabWorldAddonStatus.Text = "世界备份已创建，正在再次检查并修改配置…"
+                LabWorldAddonStatus.Text = "正在备份世界，并重新检查后修改配置…"
                 Dim Change = Await Task.Run(Function()
                                                 If IsKnownBedrockProcessRunning() Then Throw New InvalidOperationException("Minecraft 正在运行，请关闭后重试。")
                                                 Dim CurrentRoots = ValidateInstallTarget(Installation, Root)
@@ -683,6 +678,10 @@ Public Class PageBedrockRight
                                                     If IsKnownBedrockProcessRunning() Then Throw New InvalidOperationException("Minecraft 正在运行，请关闭后重试。")
                                                     Dim LockedRoots = ValidateInstallTarget(Installation, Root)
                                                     If Not SameRoots(CurrentRoots, LockedRoots) Then Throw New InvalidOperationException("数据目录范围已变化，请重新确认。")
+                                                    BedrockWorldBackup.Create(Root, World, FullBackup, LockedRoots)
+                                                    If IsKnownBedrockProcessRunning() Then Throw New InvalidOperationException("Minecraft 正在运行，请关闭后重试。")
+                                                    Dim AfterBackupRoots = ValidateInstallTarget(Installation, Root)
+                                                    If Not SameRoots(LockedRoots, AfterBackupRoots) Then Throw New InvalidOperationException("数据目录范围已变化，请重新确认。")
                                                     If Reverse IsNot Nothing Then
                                                         Dim CurrentReverse = BedrockWorldDependents.Check(LockedRoots, Root, World, Pack.Uuid)
                                                         If Not BedrockWorldDependents.Equivalent(Reverse, CurrentReverse) Then Throw New InvalidOperationException("世界配置或反向依赖已变化，请重新确认。")
@@ -752,17 +751,21 @@ Public Class PageBedrockRight
                 LabWorldAddonStatus.Text = "已取消恢复。"
                 Return
             End If
-            LabWorldAddonStatus.Text = "正在备份并校验整个世界…"
-            Await Task.Run(Sub()
-                               If IsKnownBedrockProcessRunning() Then Throw New InvalidOperationException("Minecraft 正在运行，请关闭后重试。")
-                               BedrockWorldBackup.Create(Root, World, FullBackup, Roots)
-                           End Sub)
-            LabWorldAddonStatus.Text = "世界备份已创建，正在校验并恢复配置…"
+            LabWorldAddonStatus.Text = "正在备份世界，并校验后恢复配置…"
             Dim Preserved = Await Task.Run(Function()
                                                If IsKnownBedrockProcessRunning() Then Throw New InvalidOperationException("Minecraft 正在运行，请关闭后重试。")
                                                Dim CurrentRoots = ValidateInstallTarget(Installation, Root)
                                                If Not SameRoots(Roots, CurrentRoots) Then Throw New InvalidOperationException("数据目录范围已变化，请重新确认。")
-                                               Return BedrockWorldPackEditor.Restore(Root, World, Backup)
+                                               Using LockScope = BedrockOperationScope.Acquire(CurrentRoots)
+                                                   If IsKnownBedrockProcessRunning() Then Throw New InvalidOperationException("Minecraft 正在运行，请关闭后重试。")
+                                                   Dim LockedRoots = ValidateInstallTarget(Installation, Root)
+                                                   If Not SameRoots(CurrentRoots, LockedRoots) Then Throw New InvalidOperationException("数据目录范围已变化，请重新确认。")
+                                                   BedrockWorldBackup.Create(Root, World, FullBackup, LockedRoots)
+                                                   If IsKnownBedrockProcessRunning() Then Throw New InvalidOperationException("Minecraft 正在运行，请关闭后重试。")
+                                                   Dim AfterBackupRoots = ValidateInstallTarget(Installation, Root)
+                                                   If Not SameRoots(LockedRoots, AfterBackupRoots) Then Throw New InvalidOperationException("数据目录范围已变化，请重新确认。")
+                                                   Return BedrockWorldPackEditor.Restore(Root, World, Backup)
+                                               End Using
                                            End Function)
             LabWorldAddonStatus.Text = "配置已恢复；游戏是否识别需自行确认。" & vbCrLf & "世界备份：" & FullBackup & vbCrLf &
                                        "恢复前副本：" & Preserved & vbCrLf & "请重新读取世界列表。"

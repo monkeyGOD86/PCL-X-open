@@ -180,6 +180,42 @@ public sealed class BedrockWorldPackEditorTests {
         Check(blocked && File.ReadAllText(config).Contains(Pack.Uuid.ToString()), "candidate root lock did not serialize the world edit");
     });
 
+    public void KeepsWorldBackupAndConfigEditInOneOperationScope() => WithFixture((root, world, backup) => {
+        string config = Path.Combine(world.Path, "world_resource_packs.json");
+        string beforeEdit = Path.Combine(backup, "before-edit.zip"), beforeRestore = Path.Combine(backup, "before-restore.zip");
+        File.WriteAllText(config, "[]");
+        var snapshot = BedrockWorldPackEditor.Read(root, world, "resource");
+        using var paused = new ManualResetEventSlim();
+        using var release = new ManualResetEventSlim();
+        using var competitorStarted = new ManualResetEventSlim();
+        var operation = Task.Run(() => {
+            using var scope = BedrockOperationScope.Acquire([root]);
+            BedrockWorldBackup.Create(root, world, beforeEdit, () => {
+                paused.Set();
+                if (!release.Wait(TimeSpan.FromSeconds(10))) throw new TimeoutException("backup test was not released");
+            });
+            var change = BedrockWorldPackEditor.SetEnabled(root, world, snapshot, Pack, true, backup);
+            BedrockWorldBackup.Create(root, world, beforeRestore);
+            BedrockWorldPackEditor.Restore(root, world, change.BackupPath!);
+        });
+        Task? competitor = null;
+        bool blocked = false;
+        try {
+            Check(paused.Wait(TimeSpan.FromSeconds(10)), "backup did not reach verification");
+            competitor = Task.Run(() => { competitorStarted.Set(); using var scope = BedrockOperationScope.Acquire([root]); });
+            blocked = competitorStarted.Wait(TimeSpan.FromSeconds(10)) && !competitor.Wait(250);
+        } finally {
+            release.Set();
+            Task.WaitAll(competitor is null ? [operation] : [operation, competitor]);
+        }
+        Check(blocked && File.ReadAllText(config) == "[]", "backup and edit were not coordinated or configuration was not restored");
+        string editedWorld = BedrockWorldBackup.RestoreAsNew(root, beforeRestore);
+        string originalWorld = BedrockWorldBackup.RestoreAsNew(root, beforeEdit);
+        Check(File.ReadAllText(Path.Combine(originalWorld, "world_resource_packs.json")) == "[]" &&
+              File.ReadAllText(Path.Combine(editedWorld, "world_resource_packs.json")).Contains(Pack.Uuid.ToString()),
+              "backups did not capture the states before edit and restore");
+    });
+
     public void SerializesWorldRestoreWithOtherRootOperations() => WithFixture((root, world, backup) => {
         string archive = Path.Combine(backup, "world.zip");
         BedrockWorldBackup.Create(root, world, archive);

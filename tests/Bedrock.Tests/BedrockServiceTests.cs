@@ -80,6 +80,7 @@ public class BedrockServiceTests {
             worldPackTests.RefusesOccupiedWorldConfigBackupPaths,
             worldPackTests.SerializesWorldBackupWithConfigChanges,
             worldPackTests.LocksAllCandidateRootsThroughWorldEdit,
+            worldPackTests.KeepsWorldBackupAndConfigEditInOneOperationScope,
             worldPackTests.SerializesWorldRestoreWithOtherRootOperations,
             worldPackTests.ChecksWorldDependencyVersionsAndDetectsChanges,
             worldPackTests.PreservesConcurrentChangesDuringConfigReplacement];
