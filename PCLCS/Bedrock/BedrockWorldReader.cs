@@ -107,16 +107,18 @@ public static class BedrockWorldReader {
     }
 
     private static IReadOnlyList<string> ReadPackReferences(string path) {
-        if (!File.Exists(path)) return [];
+        try { _ = File.GetAttributes(path); }
+        catch (FileNotFoundException) { return []; }
+        catch (DirectoryNotFoundException) { return []; }
         string json = ReadText(path, 1024 * 1024);
         using var reader = new JsonTextReader(new StringReader(json)) { MaxDepth = 16, DateParseHandling = DateParseHandling.None };
-        var array = JArray.Load(reader);
+        var array = JArray.Load(reader, new JsonLoadSettings { DuplicatePropertyNameHandling = DuplicatePropertyNameHandling.Error });
         if (reader.Read() || array.Count > 2048) throw new InvalidDataException("世界附加包配置无效。");
         var result = new List<string>();
         foreach (JToken item in array) {
             var pack = item as JObject ?? throw new InvalidDataException("世界附加包配置无效。");
-            string? id = pack.Value<string>("pack_id");
-            if (!Guid.TryParse(id, out _)) throw new InvalidDataException("世界附加包 UUID 无效。");
+            string? id = pack["pack_id"]?.Type == JTokenType.String ? pack.Value<string>("pack_id") : null;
+            if (!Guid.TryParse(id, out Guid parsed) || parsed == Guid.Empty) throw new InvalidDataException("世界附加包 UUID 无效。");
             var version = pack["version"];
             string versionText = version is JArray numbers && numbers.Count == 3 && numbers.All(n => n.Type == JTokenType.Integer)
                 ? string.Join(".", numbers.Select(n => n.ToString())) : "未知版本";

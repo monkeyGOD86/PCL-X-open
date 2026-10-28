@@ -438,6 +438,13 @@ public sealed class BedrockPackInspectorTests {
                 throw new Exception("incomplete world scan accepted");
             } catch (InvalidDataException) { }
             Check(Directory.Exists(pack), "pack changed after incomplete scan");
+            File.WriteAllText(Path.Combine(world, "world_resource_packs.json"),
+                "[{\"pack_id\":\"11111111-1111-4111-8111-111111111111\",\"pack_id\":\"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa\",\"version\":[1,2,3]}]");
+            try {
+                BedrockAddonRemoval.Remove(target, BedrockAddonCatalog.Read(target).Single(), BedrockDirectoryInstaller.Preview(pack), backup, [worldRoot]);
+                throw new Exception("ambiguous world reference was accepted");
+            } catch (InvalidDataException) { }
+            Check(Directory.Exists(pack) && !Directory.EnumerateFileSystemEntries(backup).Any(), "ambiguous world scan changed data");
         } finally { TestPaths.DeleteFixture(fixture); }
     }
 

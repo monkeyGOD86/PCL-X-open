@@ -257,6 +257,15 @@ public sealed class BedrockWorldReaderTests {
         File.WriteAllText(config, "invalid");
         usage = BedrockWorldPackUsage.Check([dataRoot], uuid);
         Check(!usage.Complete, "unreadable world was treated as safe");
+        File.WriteAllText(config, "[{\"pack_id\":\"11111111-1111-4111-8111-111111111111\",\"pack_id\":\"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa\",\"version\":[1,2,3]}]");
+        usage = BedrockWorldPackUsage.Check([dataRoot], uuid);
+        Check(!usage.Complete, "duplicate pack_id was treated as a complete scan");
+        File.WriteAllText(config, "[{\"pack_id\":{},\"version\":[1,2,3]}]");
+        usage = BedrockWorldPackUsage.Check([dataRoot], uuid);
+        Check(!usage.Complete, "non-string pack_id was treated as a complete scan");
+        File.WriteAllText(config, "[{\"pack_id\":\"00000000-0000-0000-0000-000000000000\",\"version\":[1,2,3]}]");
+        usage = BedrockWorldPackUsage.Check([dataRoot], uuid);
+        Check(!usage.Complete, "empty UUID was treated as a complete scan");
     });
 
     private static void WithWorld(Action<string, string, string> test) {
