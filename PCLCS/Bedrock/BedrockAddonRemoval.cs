@@ -43,7 +43,8 @@ public static class BedrockAddonRemoval {
     }
 
     public static BedrockRemovedAddon Remove(BedrockDataRoot root, BedrockInstalledAddon selected,
-        BedrockDirectoryPreview confirmed, string backupParent, IReadOnlyList<BedrockDataRoot> worldRoots) {
+        BedrockDirectoryPreview confirmed, string backupParent, IReadOnlyList<BedrockDataRoot> worldRoots,
+        IReadOnlyList<BedrockDataRoot>? globalRoots = null) {
         string rootPath = NormalizeRoot(root);
         string source = Path.GetFullPath(selected.Path).TrimEnd(Path.DirectorySeparatorChar);
         string relative = RelativePackPath(rootPath, source);
@@ -51,7 +52,15 @@ public static class BedrockAddonRemoval {
         if (Contains(rootPath, backupRoot)) throw new InvalidDataException("附加包备份必须位于游戏数据目录之外。");
         BedrockDataRootFinder.EnsureNoReparsePoints(backupRoot);
         if (worldRoots.Count is < 1 or > 128) throw new InvalidDataException("必须确认用于世界引用检查的数据目录。");
-        string[] lockPaths = worldRoots.Select(item => NormalizeRoot(item)).Concat([rootPath]).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+        globalRoots ??= worldRoots.Concat([root]).GroupBy(item => NormalizeRoot(item), StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.First()).ToArray();
+        if (globalRoots.Count is < 1 or > 129) throw new InvalidDataException("必须确认全局资源候选目录范围。");
+        string[] globalPaths = globalRoots.Select(NormalizeRoot).ToArray();
+        if (globalPaths.Distinct(StringComparer.OrdinalIgnoreCase).Count() != globalPaths.Length ||
+            !globalPaths.Contains(rootPath, StringComparer.OrdinalIgnoreCase) ||
+            worldRoots.Any(item => !globalPaths.Contains(NormalizeRoot(item), StringComparer.OrdinalIgnoreCase)))
+            throw new InvalidDataException("全局资源检查范围必须包含目标和全部世界目录，且不能重复。");
+        string[] lockPaths = globalPaths;
         if (root.SupportsWorlds && !worldRoots.Any(item => string.Equals(NormalizeRoot(item), rootPath, StringComparison.OrdinalIgnoreCase)))
             throw new InvalidDataException("世界检查范围必须包含所选账户目录。");
         if (lockPaths.Any(path => Contains(path, backupRoot))) throw new InvalidDataException("备份不能位于检查范围内的游戏数据目录中。");
@@ -60,7 +69,7 @@ public static class BedrockAddonRemoval {
             string.Equals(Path.GetFullPath(item.Path).TrimEnd(Path.DirectorySeparatorChar), source, StringComparison.OrdinalIgnoreCase));
         if (match?.Manifest is null) throw new InvalidDataException("所选附加包已不存在或无法识别。");
         Verify(source, confirmed.Pack.Uuid, confirmed.Pack.Version, confirmed.Fingerprint);
-        RequireUnused(root, worldRoots, confirmed.Pack.Uuid);
+        RequireUnused(worldRoots, globalRoots, confirmed.Pack.Uuid);
         string id = Guid.NewGuid().ToString("N");
         string backup = Path.Combine(backupRoot, "pcl-addon-backup-" + id);
         string transaction = Path.Combine(rootPath, Prefix + id);
@@ -82,7 +91,7 @@ public static class BedrockAddonRemoval {
                 file.Flush(true);
             }
             Verify(source, confirmed.Pack.Uuid, confirmed.Pack.Version, confirmed.Fingerprint);
-            RequireUnused(root, worldRoots, confirmed.Pack.Uuid);
+            RequireUnused(worldRoots, globalRoots, confirmed.Pack.Uuid);
             BedrockDataRootFinder.EnsureNoReparsePoints(transaction);
             string content = Path.Combine(transaction, "content");
             Directory.Move(source, content);
@@ -93,12 +102,10 @@ public static class BedrockAddonRemoval {
         }
     }
 
-    private static void RequireUnused(BedrockDataRoot target, IReadOnlyList<BedrockDataRoot> roots, Guid uuid) {
+    private static void RequireUnused(IReadOnlyList<BedrockDataRoot> roots, IReadOnlyList<BedrockDataRoot> globalRoots, Guid uuid) {
         var usage = BedrockWorldPackUsage.Check(roots, uuid);
         if (!usage.Complete) throw new InvalidDataException("部分世界无法检查，不能安全移除附加包。");
         if (usage.References.Count > 0) throw new InvalidDataException("所选范围中的世界仍引用此附加包，请先检查世界配置。");
-        var globalRoots = roots.Concat([target]).GroupBy(item => Path.GetFullPath(item.Path).TrimEnd(Path.DirectorySeparatorChar), StringComparer.OrdinalIgnoreCase)
-            .Select(group => group.First()).ToArray();
         var global = BedrockGlobalPackUsage.Check(globalRoots, uuid);
         if (global.IncompletePaths.Count > 0) throw new InvalidDataException("候选全局资源配置无法检查，不能安全移除附加包。");
         if (global.References.Count > 0) throw new InvalidDataException("候选全局资源配置仍引用此附加包，请先检查游戏设置。");

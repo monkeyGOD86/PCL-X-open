@@ -414,6 +414,22 @@ public sealed class BedrockPackInspectorTests {
             File.WriteAllText(global, "[{\"pack_id\":\"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa\",\"version\":[1,0,0]}]");
             usage = BedrockGlobalPackUsage.Check([target, worldRoot], uuid);
             Check(usage.References.Count == 0 && usage.IncompletePaths.Count == 0, "unrelated global pack reported as a match");
+            string extra = Path.Combine(fixture, "other-account");
+            string extraGlobal = Path.Combine(extra, "minecraftpe", "global_resource_packs.json");
+            Directory.CreateDirectory(Path.GetDirectoryName(extraGlobal)!);
+            File.WriteAllText(extraGlobal, "[{\"pack_id\":\"11111111-1111-4111-8111-111111111111\",\"version\":[1,2,3]}]");
+            var extraRoot = new BedrockDataRoot(extra, "other account");
+            try {
+                BedrockAddonRemoval.Remove(target, BedrockAddonCatalog.Read(target).Single(), BedrockDirectoryInstaller.Preview(pack), backup,
+                    [worldRoot], [target, worldRoot, extraRoot]);
+                throw new Exception("reference in account without worlds was missed");
+            } catch (InvalidDataException) { }
+            try {
+                BedrockAddonRemoval.Remove(target, BedrockAddonCatalog.Read(target).Single(), BedrockDirectoryInstaller.Preview(pack), backup,
+                    [worldRoot], [extraRoot]);
+                throw new Exception("incomplete global scope was accepted");
+            } catch (InvalidDataException) { }
+            Check(Directory.Exists(pack) && !Directory.EnumerateFileSystemEntries(backup).Any(), "global scope checks changed data");
         } finally { TestPaths.DeleteFixture(fixture); }
     }
 
