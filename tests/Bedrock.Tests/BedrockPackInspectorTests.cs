@@ -570,6 +570,28 @@ public sealed class BedrockPackInspectorTests {
         } finally { TestPaths.DeleteFixture(fixture); }
     }
 
+    public void RejectsInstallWhenPackCategoryIsNotDirectory() {
+        string fixture = Path.Combine(Path.GetTempPath(), "pcl-addon-category-test-" + Guid.NewGuid().ToString("N"));
+        string game = Path.Combine(fixture, "game"), source = Path.Combine(fixture, "source");
+        string resources = Path.Combine(game, "resource_packs"), badCategory = Path.Combine(game, "behavior_packs");
+        Directory.CreateDirectory(resources); Directory.CreateDirectory(source);
+        try {
+            File.WriteAllText(Path.Combine(source, "manifest.json"), Manifest);
+            var root = new BedrockDataRoot(game, "fixture");
+            var preview = BedrockDirectoryInstaller.Preview(source);
+            Check(BedrockAddonScope.Check([root], [preview.Pack.Uuid]).Complete, "missing category was not treated as absent");
+            File.WriteAllText(badCategory, "user data");
+            var scope = BedrockAddonScope.Check([root], [preview.Pack.Uuid]);
+            Check(!scope.Complete, "category occupied by a file was silently skipped");
+            try {
+                BedrockAddonTransaction.Prepare(root, [new BedrockPreparedPack(source, preview)], [root]);
+                throw new Exception("installation accepted incomplete category scan");
+            } catch (InvalidDataException) { }
+            Check(File.ReadAllText(badCategory) == "user data" && !Directory.EnumerateDirectories(game, ".pcl-addon-transaction-*").Any(),
+                "rejected preparation changed game data");
+        } finally { TestPaths.DeleteFixture(fixture); }
+    }
+
     public void ChecksConflictsAcrossExplicitRootsAndReportsIncompleteScan() {
         string fixture = Path.Combine(Path.GetTempPath(), "pcl-bedrock-scope-test-" + Guid.NewGuid().ToString("N"));
         string account = Path.Combine(fixture, "account"), shared = Path.Combine(fixture, "shared");

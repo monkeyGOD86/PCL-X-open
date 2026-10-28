@@ -16,11 +16,16 @@ public static class BedrockAddonCatalog {
     ];
 
     public static IReadOnlyList<BedrockInstalledAddon> Read(BedrockDataRoot root) {
-        BedrockDataRootFinder.EnsureNoReparsePoints(root.Path);
+        EnsureRootDirectory(root.Path);
         var result = new List<BedrockInstalledAddon>();
         foreach (var (folder, label) in Folders) {
             string parent = System.IO.Path.Combine(root.Path, folder);
-            if (!Directory.Exists(parent)) continue;
+            FileAttributes attributes;
+            try { attributes = File.GetAttributes(parent); }
+            catch (FileNotFoundException) { continue; }
+            catch (DirectoryNotFoundException) { continue; }
+            if ((attributes & FileAttributes.Directory) == 0)
+                throw new InvalidDataException("附加包分类路径被文件占用，无法完整检查：" + parent);
             BedrockDataRootFinder.EnsureNoReparsePoints(parent);
             foreach (string path in Directory.EnumerateDirectories(parent)) {
                 if (result.Count >= 4096) throw new InvalidDataException("附加包数量超过读取限制。");
@@ -45,6 +50,7 @@ public static class BedrockAddonCatalog {
                 }
             }
         }
+        EnsureRootDirectory(root.Path);
         var byUuid = result.Where(item => item.Manifest is not null).GroupBy(item => item.Manifest!.Uuid)
             .ToDictionary(group => group.Key, group => group.ToArray());
         bool incomplete = result.Any(item => item.Error is not null);
@@ -70,6 +76,12 @@ public static class BedrockAddonCatalog {
             item.Warnings = warnings;
         }
         return result;
+    }
+
+    private static void EnsureRootDirectory(string path) {
+        if ((File.GetAttributes(path) & FileAttributes.Directory) == 0)
+            throw new InvalidDataException("数据目录不可用，无法完整检查附加包。");
+        BedrockDataRootFinder.EnsureNoReparsePoints(path);
     }
 
     private static void AddPackage(List<BedrockInstalledAddon> result, string path, string label) {
