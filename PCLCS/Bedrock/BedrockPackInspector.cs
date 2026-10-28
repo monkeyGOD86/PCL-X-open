@@ -5,7 +5,8 @@ using System.Text.RegularExpressions;
 namespace PCLCS.Bedrock;
 
 public sealed class BedrockPackInfo(string name, string description, Guid uuid, string version,
-    IReadOnlyList<string> modules, IReadOnlyList<string> dependencies, string? minEngineVersion, string? packScope = null) {
+    IReadOnlyList<string> modules, IReadOnlyList<string> dependencies, string? minEngineVersion, string? packScope = null,
+    string? displayName = null, string? displayDescription = null, string? displayLanguage = null) {
     public string Name { get; } = name;
     public string Description { get; } = description;
     public Guid Uuid { get; } = uuid;
@@ -15,6 +16,9 @@ public sealed class BedrockPackInfo(string name, string description, Guid uuid, 
     public string? MinEngineVersion { get; } = minEngineVersion;
     /// <summary>Declared resource pack scope; absent means any. Unknown values remain explicit.</summary>
     public string PackScope { get; } = packScope ?? "any";
+    public string DisplayName { get; } = displayName ?? name;
+    public string DisplayDescription { get; } = displayDescription ?? description;
+    public string? DisplayLanguage { get; } = displayLanguage;
 }
 
 /// <summary>Validates archives without extracting or executing their contents.</summary>
@@ -85,13 +89,17 @@ public static class BedrockPackInspector {
             if (content.Length + count > MaxManifestBytes) throw new InvalidDataException("清单过大。");
             content.Write(buffer, 0, count);
         }
-        return ParseManifest(content.ToArray());
+        var pack = ParseManifest(content.ToArray());
+        return BedrockPackLocalization.FromDirectory(pack, Path.GetDirectoryName(path)!);
     }
 
     private static List<BedrockPackInfo> InspectArchive(ZipArchive archive, bool addon, ArchiveBudget budget) {
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var files = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var manifests = new List<BedrockPackInfo>();
+        var localManifests = new List<(int Index, string Prefix)>();
+        var translations = new Dictionary<string, byte[]>(StringComparer.OrdinalIgnoreCase);
+        long translationBytes = 0;
         foreach (var entry in archive.Entries) {
             if (++budget.Entries > MaxEntries) throw new InvalidDataException("压缩包条目过多。");
             string name = ValidateName(entry);
@@ -110,7 +118,9 @@ public static class BedrockPackInspector {
             if (nestedPack && !addon) throw new InvalidDataException("资源包中不能包含嵌套资源包。");
             bool manifest = name.Equals("manifest.json", StringComparison.OrdinalIgnoreCase) ||
                 name.EndsWith("/manifest.json", StringComparison.OrdinalIgnoreCase);
-            long captureLimit = nestedPack ? MaxNestedBytes : manifest ? MaxManifestBytes : 0;
+            bool translation = BedrockPackLocalization.IsCandidate(name) && entry.Length <= BedrockPackLocalization.MaxFileBytes &&
+                entry.Length <= 4 * 1024 * 1024 - translationBytes;
+            long captureLimit = nestedPack ? MaxNestedBytes : manifest ? MaxManifestBytes : translation ? BedrockPackLocalization.MaxFileBytes : 0;
             using var input = entry.Open();
             byte[]? content = ReadEntry(input, entry.Length, captureLimit, budget);
             if (nestedPack) {
@@ -118,7 +128,11 @@ public static class BedrockPackInspector {
                 using var nested = new ZipArchive(nestedStream, ZipArchiveMode.Read);
                 manifests.AddRange(InspectArchive(nested, false, budget));
             } else if (manifest) {
+                localManifests.Add((manifests.Count, name.Substring(0, name.Length - "manifest.json".Length)));
                 manifests.Add(ParseManifest(content!));
+            } else if (translation) {
+                translations.Add(name, content!);
+                translationBytes += content!.Length;
             }
             if (manifests.Count > 128) throw new InvalidDataException("附加包中包含过多的包。");
         }
@@ -130,6 +144,8 @@ public static class BedrockPackInspector {
             }
         }
         if (!addon && manifests.Count != 1) throw new InvalidDataException("每个 .mcpack 必须包含一个包清单。");
+        foreach (var (index, prefix) in localManifests)
+            manifests[index] = BedrockPackLocalization.FromArchive(manifests[index], prefix, translations);
         return manifests;
     }
 

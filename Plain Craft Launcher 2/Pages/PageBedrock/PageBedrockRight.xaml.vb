@@ -284,7 +284,7 @@ Public Class PageBedrockRight
         Try
             Dim Addons = Await Task.Run(Function() BedrockAddonCatalog.Read(Root))
             For Each Addon In Addons
-                Dim Name = If(Addon.Manifest Is Nothing, Path.GetFileName(Addon.Path), Addon.Manifest.Name)
+                Dim Name = If(Addon.Manifest Is Nothing, Path.GetFileName(Addon.Path), Addon.Manifest.DisplayName)
                 ComboAddons.Items.Add(New MyComboBoxItem With {.Content = Addon.Category & " · " & Name, .Tag = Addon})
             Next
             LabAddonStatus.Text = If(Addons.Count = 0, "此目录中没有发现附加包。", $"发现 {Addons.Count} 个附加包，请选择查看详情。")
@@ -308,6 +308,7 @@ Public Class PageBedrockRight
         Else
             Dim Pack = Addon.Manifest
             LabAddonDetails.Text = $"清单名称：{Pack.Name}（可能为本地化键）　版本：{Pack.Version}" & vbCrLf & $"UUID：{Pack.Uuid}　类型：{String.Join(", ", Pack.Modules)}" & vbCrLf &
+                                   If(Pack.DisplayLanguage Is Nothing OrElse Pack.DisplayName = Pack.Name, "", $"名称候选（{Pack.DisplayLanguage}）：{Pack.DisplayName}" & vbCrLf) &
                                    If(Pack.Modules.Contains("resources"), "资源包使用范围：" & Pack.PackScope & vbCrLf, "") &
                                    If(Pack.Dependencies.Count = 0, "", "依赖：" & String.Join(", ", Pack.Dependencies) & vbCrLf) &
                                    If(Addon.Warnings.Count = 0, "", "提示：" & String.Join("；", Addon.Warnings))
@@ -490,7 +491,7 @@ Public Class PageBedrockRight
             WorldAddonScanIncomplete = Result.IncompleteRoots.Count > 0
             For Each Choice In Result.Choices
                 Dim Pack = Choice.Addon.Manifest
-                ComboWorldAddons.Items.Add(New MyComboBoxItem With {.Content = If(Choice.IsWorldReference, "世界引用", Choice.Root.Source) & " · " & Pack.Name & " · " & Pack.Version, .Tag = Choice})
+                ComboWorldAddons.Items.Add(New MyComboBoxItem With {.Content = If(Choice.IsWorldReference, "世界引用", Choice.Root.Source) & " · " & Pack.DisplayName & " · " & Pack.Version, .Tag = Choice})
             Next
             LabWorldAddonStatus.Text = If(Result.Choices.Count = 0, "候选目录中没有可识别的附加包。", $"发现 {Result.Choices.Count} 个候选包；请选择后检查其使用范围。") &
                                        If(Result.IncompleteRoots.Count = 0, "", vbCrLf & "部分目录无法完整读取；已安装包的配置修改已禁用，现有世界引用仍可在备份后停用。") &
@@ -548,6 +549,7 @@ Public Class PageBedrockRight
         If Choice IsNot Nothing Then
             Dim Pack = Choice.Addon.Manifest
             LabWorldAddonStatus.Text = $"清单名称：{Pack.Name}（可能为本地化键）　版本：{Pack.Version}" & vbCrLf & $"UUID：{Pack.Uuid}　类型：{String.Join(", ", Pack.Modules)}" & vbCrLf &
+                                       If(Pack.DisplayLanguage Is Nothing OrElse Pack.DisplayName = Pack.Name, "", $"名称候选（{Pack.DisplayLanguage}）：{Pack.DisplayName}" & vbCrLf) &
                                        If(Pack.Modules.Contains("resources"), "资源包使用范围：" & Pack.PackScope & vbCrLf, "") &
                                        If(Choice.IsWorldReference, "来源：当前世界配置；可停用该引用。", "包目录：" & Choice.Addon.Path)
             Dim Installation = TryCast(TryCast(ComboInstall.SelectedItem, MyComboBoxItem)?.Tag, BedrockInstallation)
@@ -1005,8 +1007,11 @@ Public Class PageBedrockRight
         Dim Lines As New List(Of String)
         For Each Pack In Packs
             Dim Description = If(Pack.Description.Length > 300, Pack.Description.Substring(0, 300) & "…", Pack.Description)
+            Dim DisplayDescription = If(Pack.DisplayDescription.Length > 300, Pack.DisplayDescription.Substring(0, 300) & "…", Pack.DisplayDescription)
             Lines.Add($"清单名称：{Pack.Name}（可能为本地化键）　版本：{Pack.Version}" & vbCrLf &
                       If(Description.Length = 0, "", "清单描述：" & Description & "（可能为本地化键）" & vbCrLf) &
+                      If(Pack.DisplayLanguage Is Nothing OrElse Pack.DisplayName = Pack.Name, "", $"名称候选（{Pack.DisplayLanguage}）：{Pack.DisplayName}" & vbCrLf) &
+                      If(Pack.DisplayLanguage Is Nothing OrElse DisplayDescription = Description OrElse DisplayDescription.Length = 0, "", $"描述候选（{Pack.DisplayLanguage}）：{DisplayDescription}" & vbCrLf) &
                       $"UUID：{Pack.Uuid}　类型：{String.Join(", ", Pack.Modules)}" & vbCrLf &
                       If(Pack.Modules.Contains("resources"), "资源包使用范围：" & Pack.PackScope & vbCrLf, "") &
                       If(Pack.Dependencies.Count > 0, "依赖：" & String.Join(", ", Pack.Dependencies) & vbCrLf, "") &

@@ -19,6 +19,62 @@ public sealed class BedrockPackInspectorTests {
         Check(pack.PackScope == "any", "missing scope did not default to any");
     });
 
+    public void ResolvesPackLocalizationWithoutChangingManifestIdentity() {
+        string manifest = Manifest.Replace("\"description\":\"demo\"", "\"description\":\"pack.description\"");
+        WithArchive(".mcpack", zip => {
+            Add(zip, "texts/zh_CN.lang", "pack.name=中文名称\npack.description=中文描述\n");
+            Add(zip, "texts/en_US.lang", "pack.name=English name\n");
+            Add(zip, "manifest.json", manifest);
+        }, path => {
+            var pack = BedrockPackInspector.Inspect(path).Single();
+            Check(pack.Name == "pack.name" && pack.Description == "pack.description" && pack.Version == "1.2.3", "manifest identity changed");
+            Check(pack.DisplayName == "中文名称" && pack.DisplayDescription == "中文描述" && pack.DisplayLanguage == "zh_CN", "Chinese localization missing");
+        });
+        WithArchive(".mcpack", zip => {
+            Add(zip, "manifest.json", manifest);
+            Add(zip, "texts/zh_CN.lang", "pack.name=first\npack.name=second\n");
+            Add(zip, "texts/en_US.lang", "pack.name=English name\n");
+        }, path => {
+            var pack = BedrockPackInspector.Inspect(path).Single();
+            Check(pack.DisplayName == "English name" && pack.DisplayDescription == "pack.description" && pack.DisplayLanguage == "en_US", "ambiguous localization did not fall back");
+        });
+        WithArchive(".mcaddon", zip => {
+            Add(zip, "first/manifest.json", manifest);
+            Add(zip, "first/texts/en_US.lang", "pack.name=First\n");
+            Add(zip, "second/manifest.json", manifest.Replace("11111111-1111-4111-8111-111111111111", "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"));
+            Add(zip, "second/texts/en_US.lang", "pack.name=Second\n");
+        }, path => {
+            var packs = BedrockPackInspector.Inspect(path);
+            Check(packs.Count == 2 && packs[0].DisplayName == "First" && packs[1].DisplayName == "Second", "translations leaked between packs");
+        });
+        WithArchive(".mcpack", zip => {
+            Add(zip, "manifest.json", manifest);
+            using var stream = zip.CreateEntry("texts/zh_CN.lang").Open();
+            stream.WriteByte(0xff);
+        }, path => {
+            var pack = BedrockPackInspector.Inspect(path).Single();
+            Check(pack.DisplayName == pack.Name && pack.DisplayLanguage is null, "invalid localization changed display");
+        });
+        using var nested = new MemoryStream();
+        using (var zip = new ZipArchive(nested, ZipArchiveMode.Create, true)) {
+            Add(zip, "manifest.json", manifest); Add(zip, "texts/en_US.lang", "pack.name=Nested pack\n");
+        }
+        WithArchive(".mcaddon", zip => {
+            using var stream = zip.CreateEntry("inside.mcpack").Open();
+            byte[] bytes = nested.ToArray(); stream.Write(bytes, 0, bytes.Length);
+        }, path => Check(BedrockPackInspector.Inspect(path).Single().DisplayName == "Nested pack", "nested localization missing"));
+
+        string fixture = Path.Combine(Path.GetTempPath(), "pcl-localization-test-" + Guid.NewGuid().ToString("N"));
+        string texts = Path.Combine(fixture, "texts");
+        Directory.CreateDirectory(texts);
+        try {
+            File.WriteAllText(Path.Combine(fixture, "manifest.json"), manifest);
+            File.WriteAllText(Path.Combine(texts, "zh_CN.lang"), "pack.name=目录名称\n");
+            var pack = BedrockPackInspector.InspectDirectory(fixture);
+            Check(pack.Name == "pack.name" && pack.DisplayName == "目录名称", "directory localization missing");
+        } finally { TestPaths.DeleteFixture(fixture); }
+    }
+
     public void ReadsResourcePackScopeAndRejectsInvalidType() {
         WithArchive(".mcpack", zip => Add(zip, "manifest.json", Manifest.Replace("\"description\":\"demo\"", "\"description\":\"demo\",\"pack_scope\":\"global\"")),
             path => Check(BedrockPackInspector.Inspect(path).Single().PackScope == "global", "scope not preserved"));

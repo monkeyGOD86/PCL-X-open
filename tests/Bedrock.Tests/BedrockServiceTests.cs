@@ -15,6 +15,7 @@ public class BedrockServiceTests {
             tests.UnsupportedApplicationIsNotActivated,
             tests.ActivationErrorIsReportedRatherThanClaimedAsSuccess,
             packTests.ParsesResourcePackMetadata,
+            packTests.ResolvesPackLocalizationWithoutChangingManifestIdentity,
             packTests.ReadsResourcePackScopeAndRejectsInvalidType,
             packTests.ParsesNestedAddon,
             packTests.RejectsUnsafePathsAndDuplicateNames,
