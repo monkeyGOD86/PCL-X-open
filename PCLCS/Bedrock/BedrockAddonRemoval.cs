@@ -141,9 +141,20 @@ public static class BedrockAddonRemoval {
 
     /// <summary>Copies a verified external backup through a new same-volume stage; never deletes the backup.</summary>
     public static string RestoreFromBackup(BedrockDataRoot root, string transaction, IReadOnlyList<BedrockDataRoot> scope) =>
-        RestoreFromBackup(root, transaction, scope, null);
+        RestoreBackupCore(root, transaction, scope, null, null);
 
-    internal static string RestoreFromBackup(BedrockDataRoot root, string transaction, IReadOnlyList<BedrockDataRoot> scope, Action<string>? beforeMove) {
+    /// <summary>Restores a user-selected relocated backup after matching it against the transaction.</summary>
+    public static string RestoreFromSelectedBackup(BedrockDataRoot root, string transaction,
+        IReadOnlyList<BedrockDataRoot> scope, string selectedBackup) {
+        if (string.IsNullOrWhiteSpace(selectedBackup)) throw new InvalidDataException("未选择外部备份目录。");
+        return RestoreBackupCore(root, transaction, scope, selectedBackup, null);
+    }
+
+    internal static string RestoreFromBackup(BedrockDataRoot root, string transaction, IReadOnlyList<BedrockDataRoot> scope, Action<string>? beforeMove) =>
+        RestoreBackupCore(root, transaction, scope, null, beforeMove);
+
+    private static string RestoreBackupCore(BedrockDataRoot root, string transaction, IReadOnlyList<BedrockDataRoot> scope,
+        string? selectedBackup, Action<string>? beforeMove) {
         string rootPath = NormalizeRoot(root);
         if (scope.Count is < 1 or > 128) throw new InvalidDataException("必须确认附加包冲突检查范围。");
         string[] paths = scope.Select(NormalizeRoot).ToArray();
@@ -154,12 +165,12 @@ public static class BedrockAddonRemoval {
         string relative = record.Value<string>("relativePath")!;
         string content = Path.Combine(stage, "content");
         if (PathExists(content)) throw new IOException("隔离内容仍存在，请使用常规恢复流程。");
-        string backupValue = record.Value<string>("backupPath") ?? "";
+        string backupValue = selectedBackup ?? record.Value<string>("backupPath") ?? "";
         if (!Path.IsPathRooted(backupValue)) throw new InvalidDataException("外部备份路径无效。");
         string backup = Path.GetFullPath(backupValue).TrimEnd(Path.DirectorySeparatorChar);
         string id = record.Value<string>("id")!;
-        if (!string.Equals(backup, backupValue, StringComparison.OrdinalIgnoreCase) ||
-            !string.Equals(Path.GetFileName(backup), "pcl-addon-backup-" + id, StringComparison.OrdinalIgnoreCase) ||
+        if (!string.Equals(backup, backupValue.TrimEnd(Path.DirectorySeparatorChar), StringComparison.OrdinalIgnoreCase) ||
+            (selectedBackup is null && !string.Equals(Path.GetFileName(backup), "pcl-addon-backup-" + id, StringComparison.OrdinalIgnoreCase)) ||
             paths.Any(path => Contains(path, backup) || Contains(backup, path)))
             throw new InvalidDataException("外部备份位置不受支持或与游戏目录重叠。");
         BedrockDataRootFinder.EnsureNoReparsePoints(backup);

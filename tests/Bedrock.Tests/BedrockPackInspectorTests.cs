@@ -439,6 +439,8 @@ public sealed class BedrockPackInspectorTests {
             try { BedrockAddonRemoval.RestoreFromBackup(root, removal.TransactionPath, [root]); throw new Exception("backup inside game data accepted"); }
             catch (InvalidDataException) { }
             File.WriteAllText(journalPath, journal);
+            try { BedrockAddonRemoval.RestoreFromSelectedBackup(root, removal.TransactionPath, [root], fakeBackup); throw new Exception("selected game-data backup accepted"); }
+            catch (InvalidDataException) { }
             string duplicate = Path.Combine(other, "resource_packs", "duplicate");
             Directory.CreateDirectory(duplicate); File.WriteAllText(Path.Combine(duplicate, "manifest.json"), Manifest);
             try { BedrockAddonRemoval.RestoreFromBackup(root, removal.TransactionPath, [root, otherRoot]); throw new Exception("duplicate UUID accepted"); }
@@ -453,10 +455,22 @@ public sealed class BedrockPackInspectorTests {
                 throw new Exception("modified recovery stage accepted");
             } catch (IOException ex) { Check(ex.Message.Contains("暂存目录"), "recovery stage not reported"); }
             Check(!Directory.Exists(pack) && failedStage is not null && File.Exists(Path.Combine(failedStage, "changed.txt")), "failed stage was lost");
-            string restored = BedrockAddonRemoval.RestoreFromBackup(root, removal.TransactionPath, [root, otherRoot]);
+            string movedBackup = Path.Combine(fixture, "renamed-backup");
+            Check(Path.GetFullPath(removal.BackupPath).StartsWith(Path.GetFullPath(fixture) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase) &&
+                Path.GetFullPath(movedBackup).StartsWith(Path.GetFullPath(fixture) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase), "fixture move escapes test root");
+            Directory.Move(removal.BackupPath, movedBackup);
+            try { BedrockAddonRemoval.RestoreFromBackup(root, removal.TransactionPath, [root, otherRoot]); throw new Exception("missing recorded backup accepted"); }
+            catch (IOException) { }
+            string movedExtra = Path.Combine(movedBackup, "changed.txt");
+            File.WriteAllText(movedExtra, "changed");
+            try { BedrockAddonRemoval.RestoreFromSelectedBackup(root, removal.TransactionPath, [root, otherRoot], movedBackup); throw new Exception("changed selected backup accepted"); }
+            catch (InvalidDataException) { }
+            Check(!Directory.Exists(pack) && File.Exists(movedExtra), "rejected selected backup changed data");
+            File.Delete(movedExtra);
+            string restored = BedrockAddonRemoval.RestoreFromSelectedBackup(root, removal.TransactionPath, [root, otherRoot], movedBackup);
             Check(restored == pack && File.ReadAllText(Path.Combine(restored, "payload.txt")) == "original" &&
-                File.ReadAllText(Path.Combine(removal.BackupPath, "payload.txt")) == "original" && Directory.Exists(held), "backup restore lost content");
-            try { BedrockAddonRemoval.RestoreFromBackup(root, removal.TransactionPath, [root]); throw new Exception("existing target overwritten"); }
+                File.ReadAllText(Path.Combine(movedBackup, "payload.txt")) == "original" && Directory.Exists(held), "backup restore lost content");
+            try { BedrockAddonRemoval.RestoreFromSelectedBackup(root, removal.TransactionPath, [root], movedBackup); throw new Exception("existing target overwritten"); }
             catch (IOException) { }
         } finally { TestPaths.DeleteFixture(fixture); }
     }

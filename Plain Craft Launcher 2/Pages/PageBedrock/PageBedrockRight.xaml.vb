@@ -180,7 +180,7 @@ Public Class PageBedrockRight
 
     Private Shared Function CanRestoreRemoval(Removal As BedrockRemovalInfo) As Boolean
         Return Removal IsNot Nothing AndAlso Removal.Error Is Nothing AndAlso
-               (Removal.State = "已隔离" OrElse (Removal.State = "内容缺失" AndAlso Not String.IsNullOrWhiteSpace(Removal.BackupPath)))
+               (Removal.State = "已隔离" OrElse Removal.State = "内容缺失")
     End Function
 
     Private Async Sub RestoreRemovalClicked(sender As Object, e As EventArgs) Handles BtnRestoreRemoval.Click
@@ -197,9 +197,20 @@ Public Class PageBedrockRight
         Try
             LabRemovalStatus.Text = "正在检查目标和数据目录…"
             Dim Roots = Await Task.Run(Function() ValidateInstallTarget(Installation, Root))
+            Dim Backup As String = Nothing
+            If UseBackup Then
+                Using Dialog As New System.Windows.Forms.FolderBrowserDialog With {.Description = "选择原始或已移动的附加包备份目录", .ShowNewFolderButton = False}
+                    If Not String.IsNullOrWhiteSpace(Removal.BackupPath) AndAlso Directory.Exists(Removal.BackupPath) Then Dialog.SelectedPath = Removal.BackupPath
+                    If Dialog.ShowDialog() <> System.Windows.Forms.DialogResult.OK Then
+                        LabRemovalStatus.Text = "已取消恢复。"
+                        Return
+                    End If
+                    Backup = Path.GetFullPath(Dialog.SelectedPath).TrimEnd(Path.DirectorySeparatorChar)
+                End Using
+            End If
             If MyMsgBox("请确认游戏已关闭且同步完成。" & vbCrLf & vbCrLf & "数据目录：" & Root.Path & vbCrLf &
                         "恢复到：" & Removal.OriginalPath & vbCrLf & "事务：" & Removal.Path & vbCrLf &
-                        If(UseBackup, "隔离内容缺失，将复制外部备份：" & Removal.BackupPath & vbCrLf, "恢复来源：事务内的隔离内容。" & vbCrLf) &
+                        If(UseBackup, "隔离内容缺失，将复制选定的外部备份：" & Backup & vbCrLf, "恢复来源：事务内的隔离内容。" & vbCrLf) &
                         "检查目录：" & vbCrLf & String.Join(vbCrLf, Roots.Select(Function(Item) Item.Path)) & vbCrLf &
                         "恢复前会校验内容和这些目录内的冲突，不覆盖已有文件；外部备份会保留。", "确认恢复附加包", "恢复", "取消") <> 1 Then
                 LabRemovalStatus.Text = "已取消恢复。"
@@ -210,7 +221,7 @@ Public Class PageBedrockRight
                                               If IsKnownBedrockProcessRunning() Then Throw New InvalidOperationException("Minecraft 正在运行，请关闭后重试。")
                                               Dim CurrentRoots = ValidateInstallTarget(Installation, Root)
                                               If Not SameRoots(Roots, CurrentRoots) Then Throw New InvalidOperationException("数据目录范围已变化，请重新确认。")
-                                              Return If(UseBackup, BedrockAddonRemoval.RestoreFromBackup(Root, Removal.Path, CurrentRoots),
+                                              Return If(UseBackup, BedrockAddonRemoval.RestoreFromSelectedBackup(Root, Removal.Path, CurrentRoots, Backup),
                                                         BedrockAddonRemoval.Restore(Root, Removal.Path, CurrentRoots))
                                           End Function)
             ComboRemovals.Items.Clear()
