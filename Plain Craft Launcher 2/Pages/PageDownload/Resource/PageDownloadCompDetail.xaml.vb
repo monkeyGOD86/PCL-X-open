@@ -518,9 +518,24 @@ GroupDone:
                     Dim LoaderName As String = Desc & "下载：" & PathUtils.GetFileNameWithoutExtension(Target) & " "
                     If Not PathUtils.IsSame(PathUtils.RemoveLastPart(Target), DefaultFolder) Then CachedFolder(File.ResourceType) = PathUtils.RemoveLastPart(Target)
                     Dim Loaders As New List(Of LoaderBase)
+                    'Mod downloads are staged first so the final write shares the same folder lock
+                    'as team sync and the Mod management page.
+                    Dim DownloadTarget As String = If(File.ResourceType = ResourceTypes.Mod,
+                        Path.Combine(RequestTaskTempFolder(), Path.GetFileName(Target)), Target)
                     Loaders.Add(New LoaderDownload("下载文件", {
-                        File.ToNetFile(Target, If(TargetResourceType = ResourceTypes.Any, ResourceVersion.DownloadReason.Dependency, ResourceVersion.DownloadReason.Standalone))
+                        File.ToNetFile(DownloadTarget, If(TargetResourceType = ResourceTypes.Any, ResourceVersion.DownloadReason.Dependency, ResourceVersion.DownloadReason.Standalone))
                     }) With {.ProgressWeight = 6, .Block = True})
+                    If File.ResourceType = ResourceTypes.Mod Then
+                        Loaders.Add(New LoaderTask(Of Integer, Integer)("保存 Mod 文件",
+                        Sub(Task As LoaderTask(Of Integer, Integer))
+                            If Task.IsCanceled Then Throw New OperationCanceledException()
+                            Using lease = PackSyncModFolderLock.TryAcquire(PathUtils.RemoveLastPart(Target))
+                                If lease Is Nothing Then Throw New IOException("目标 Mod 文件夹正在被修改，请稍后重试下载。")
+                                If Task.IsCanceled Then Throw New OperationCanceledException()
+                                FileUtils.Move(DownloadTarget, Target)
+                            End Using
+                        End Sub) With {.ProgressWeight = 0.5, .Block = True})
+                    End If
                     '启动
                     Dim Loader As New LoaderCombo(Of Integer)(LoaderName, Loaders) With {.OnStateChanged =
                     Sub(MyLoader)

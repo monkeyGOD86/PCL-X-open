@@ -416,7 +416,7 @@ Public Module ModModpack
         For Each File In If(Json("files"), {})
             '检查是否需要该文件
             If File("env") IsNot Nothing Then
-                Select Case File("env")("client").ToString
+                Select Case File("env")?("client")?.ToString()
                     Case "optional"
                         If MyMsgBox("是否要下载可选文件 " & PathUtils.GetLastPart(File("path").ToString) & "？",
                                     "下载可选文件", "是", "否") = 2 Then
@@ -437,8 +437,9 @@ Public Module ModModpack
                 MyMsgBox($"整合包的文件路径超出了版本文件夹，请向整合包作者反馈此问题！{vbCrLf}目标：{Path.GetFullPath(TargetPath)}{vbCrLf}错误的文件：{TargetPath}", "文件路径校验失败", IsWarn:=True)
                 Throw New OperationCanceledException
             End If
+            Dim FileHash = GetModrinthFileHash(File)
             FileList.Add(New NetFile(Urls, TargetPath,
-                New FileChecker With {.Hash = File("hashes")("sha1").ToString}, True)) 'Modrinth 整合包不应校验文件大小（他们官方自己说的）
+                New FileChecker With {.Hash = FileHash}, True)) 'Modrinth 整合包不应校验文件大小（他们官方自己说的）
         Next
         If FileList.Any Then
             InstallLoaders.Add(New LoaderDownload("下载额外文件", FileList) With {.ProgressWeight = FileList.Count * 1.5}) '每个 Mod 需要 1.5s
@@ -488,6 +489,18 @@ Public Module ModModpack
         LoaderTaskbarAdd(Loader)
         FrmMain.BtnExtraDownload.ShowRefresh()
         Return Loader
+    End Function
+
+    'The sync reader accepts SHA-512-only team packages, so the installer must too.
+    Private Function GetModrinthFileHash(File As JToken) As String
+        Dim FileHash = File("hashes")?("sha512")?.ToString()
+        If String.IsNullOrEmpty(FileHash) OrElse FileHash.Length <> 128 OrElse Not FileHash.All(Function(c) Uri.IsHexDigit(c)) Then
+            FileHash = File("hashes")?("sha1")?.ToString()
+            If String.IsNullOrEmpty(FileHash) OrElse FileHash.Length <> 40 OrElse Not FileHash.All(Function(c) Uri.IsHexDigit(c)) Then
+                Throw New InvalidDataException($"整合包文件缺少有效的哈希：{File("path")}")
+            End If
+        End If
+        Return FileHash.ToLowerInvariant()
     End Function
 
     'HMCL

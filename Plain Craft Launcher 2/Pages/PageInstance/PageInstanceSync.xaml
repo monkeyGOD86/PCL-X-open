@@ -1,0 +1,35 @@
+<local:MyPageRight x:Class="PageInstanceSync"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:local="clr-namespace:PCL">
+    <ScrollViewer VerticalScrollBarVisibility="Auto">
+        <StackPanel Margin="25">
+            <TextBlock Text="小队同步" FontSize="22" Margin="0,0,0,12" />
+            <TextBlock x:Name="LabRecovery" TextWrapping="Wrap" Margin="0,0,0,6" />
+            <ComboBox x:Name="ComboRecovery" HorizontalAlignment="Left" MinWidth="260" Visibility="Collapsed" />
+            <StackPanel Orientation="Horizontal" Margin="0,8,0,10">
+                <local:MyButton x:Name="BtnRecover" Text="恢复未完成事务" Height="35" Width="150" Margin="0,0,10,0" IsEnabled="False" />
+                <local:MyButton x:Name="BtnUndo" Text="撤销上次同步" Height="35" Width="140" Margin="0,0,10,0" IsEnabled="False" />
+                <local:MyButton x:Name="BtnBackupFolder" Text="打开备份文件夹" Height="35" Width="150" />
+            </StackPanel>
+            <TextBlock Text="选择小队整合包，检查当前实例与团队文件的差异。此预览不会修改游戏文件。" TextWrapping="Wrap" Margin="0,0,0,12" />
+            <local:MyButton x:Name="BtnSelect" Text="选择整合包" Height="35" Width="140" HorizontalAlignment="Left" />
+            <TextBlock Text="或粘贴整合包路径" Margin="0,10,0,4" />
+            <DockPanel LastChildFill="True">
+                <local:MyButton x:Name="BtnLoadPath" DockPanel.Dock="Right" Text="读取路径" Height="32" Width="100" Margin="8,0,0,0" IsEnabled="{Binding IsEnabled, ElementName=BtnSelect}" />
+                <TextBox x:Name="TextPackagePath" VerticalContentAlignment="Center" MinHeight="32" IsEnabled="{Binding IsEnabled, ElementName=BtnSelect}" />
+            </DockPanel>
+            <TextBlock x:Name="LabPackage" Text="尚未选择整合包" TextWrapping="Wrap" Margin="0,12,0,8" />
+            <local:MyButton x:Name="BtnImportNew" Text="导入到新实例" Height="35" Width="140" HorizontalAlignment="Left" Margin="0,0,0,8" IsEnabled="False" />
+            <TextBlock x:Name="LabOptional" Text="可选文件" FontWeight="Bold" Margin="0,8,0,4" Visibility="Collapsed" />
+            <StackPanel x:Name="PanOptional" />
+            <local:MyButton x:Name="BtnPreview" Text="检查差异" Height="35" Width="140" HorizontalAlignment="Left" Margin="0,12,0,0" IsEnabled="False" />
+            <TextBlock x:Name="LabResult" Text="" TextWrapping="Wrap" Margin="0,14,0,6" />
+            <StackPanel x:Name="PanDifferences" />
+            <local:MyButton x:Name="BtnPlan" Text="确认处理方式" Height="35" Width="140" HorizontalAlignment="Left" Margin="0,12,0,0" IsEnabled="False" />
+            <TextBlock x:Name="LabPlan" TextWrapping="Wrap" Margin="0,10,0,0" />
+            <local:MyButton x:Name="BtnApply" Text="应用更新" Height="35" Width="140" HorizontalAlignment="Left" Margin="0,12,0,0" IsEnabled="False" />
+            <local:MyButton x:Name="BtnCancelPreparation" Text="取消同步" Height="35" Width="140" HorizontalAlignment="Left" Margin="0,8,0,0" IsEnabled="False" />
+        </StackPanel>
+    </ScrollViewer>
+</local:MyPageRight>

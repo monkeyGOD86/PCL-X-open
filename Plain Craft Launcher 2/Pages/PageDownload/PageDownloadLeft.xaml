@@ -54,6 +54,7 @@
                     </x:Array>
                 </local:MyListItem.Buttons>
             </local:MyListItem>
+            <local:MyListItem x:Name="ItemJava" Type="RadioBox" IsScaleAnimationEnabled="False" Tag="7" Height="36" Margin="0,12,0,0" Title="Java下载" Logo="M470 80 L554 80 L554 490 L675 370 L735 430 L512 653 L289 430 L349 370 L470 490 Z M180 700 L264 700 L264 790 L760 790 L760 700 L844 700 L844 874 L180 874 Z" />
         </StackPanel>
     </local:MyScrollViewer>
 </local:MyPageLeft>

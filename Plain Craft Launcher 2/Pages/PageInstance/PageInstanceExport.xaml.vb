@@ -31,6 +31,8 @@ Public Class PageInstanceExport
         Logger.Info("刷新导出页面")
         HintOptiFine.Visibility = If(PageInstanceLeft.Instance.Version.HasOptiFine AndAlso Not PageInstanceLeft.Instance.Version.OptiFineAsMod, Visibility.Visible, Visibility.Collapsed)
         CurrentInstance = PageInstanceLeft.Instance.PathVersion
+        CheckGroupExport.IsChecked = False
+        TextGroupOutput.Text = ""
         TextExportName.Text = ""
         TextExportName.HintText = PageInstanceLeft.Instance.Name
         TextExportVersion.Text = ""
@@ -43,6 +45,54 @@ Public Class PageInstanceExport
         RefreshAllOptionsUI()
         RefreshJavaInfo()
         PanBack.ScrollToHome()
+    End Sub
+
+    Private Sub GroupExportChanged() Handles CheckGroupExport.Checked, CheckGroupExport.Unchecked
+        If PanGroupExport Is Nothing Then Return
+        PanGroupExport.Visibility = If(CheckGroupExport.IsChecked = True, Visibility.Visible, Visibility.Collapsed)
+        If CardOptions IsNot Nothing Then CardOptions.Visibility = If(CheckGroupExport.IsChecked = True, Visibility.Collapsed, Visibility.Visible)
+        If CardAdvanced IsNot Nothing Then CardAdvanced.Visibility = If(CheckGroupExport.IsChecked = True, Visibility.Collapsed, Visibility.Visible)
+        If CheckGroupExport.IsChecked <> True Then Return
+        Try
+            Dim instance = PageInstanceLeft.Instance
+            If instance Is Nothing OrElse Not PathUtils.IsSame(instance.PathVersion, instance.PathIndie) Then Throw New Exception("小队导出需要开启版本隔离。")
+            Dim saved = PCLCS.PackSync.PackSyncPublisher.Load(instance.PathVersion)
+            Dim bound = PCLCS.PackSync.PackSyncPreview.ReadState(instance.PathVersion)
+            ComboGroupIdentity.Items.Clear()
+            If saved IsNot Nothing Then ComboGroupIdentity.Items.Add(New ComboBoxItem With {.Content = "沿用维护者小队  " & saved.PackId.ToString(), .Tag = saved.PackId.ToString()})
+            If bound IsNot Nothing Then ComboGroupIdentity.Items.Add(New ComboBoxItem With {.Content = "沿用已绑定的小队  " & bound.PackId.ToString(), .Tag = bound.PackId.ToString()})
+            ComboGroupIdentity.Items.Add(New ComboBoxItem With {.Content = "新建小队", .Tag = "new"})
+            ComboGroupIdentity.SelectedIndex = 0
+            BtnReuseGroupChoices.IsEnabled = saved IsNot Nothing
+            PanGroupFiles.Children.Clear()
+            Dim manifest = Configs.McInstallManifest.Get(instance.Config)
+            Dim components As New HashSet(Of String)(If(manifest Is Nothing, Enumerable.Empty(Of String)(),
+                manifest.ManagedFiles.Where(Function(f) Not String.IsNullOrWhiteSpace(f.Component)).Select(Function(f) f.RelativePath)), StringComparer.OrdinalIgnoreCase)
+            For Each path In PCLCS.PackSync.PackSyncPublisher.EnumerateCandidates(instance.PathVersion)
+                Dim isComponent = components.Contains(path)
+                PanGroupFiles.Children.Add(New CheckBox With {.Content = path & If(isComponent, "（安装器组件，更新时需新建实例）", ""), .Tag = path,
+                    .IsChecked = path.StartsWith("mods/", StringComparison.OrdinalIgnoreCase) AndAlso Not isComponent,
+                    .Margin = New Thickness(0, 2, 0, 2)})
+            Next
+        Catch ex As Exception
+            CheckGroupExport.IsChecked = False
+            MyMsgBox(ex.Message, "无法准备小队导出", IsWarn:=True)
+        End Try
+    End Sub
+
+    Private Sub ReuseGroupChoices() Handles BtnReuseGroupChoices.Click
+        Try
+            Dim saved = PCLCS.PackSync.PackSyncPublisher.Load(PageInstanceLeft.Instance.PathVersion)
+            If saved Is Nothing Then Return
+            Dim selectedShared As New HashSet(Of String)(saved.SharedFiles, StringComparer.OrdinalIgnoreCase)
+            Dim mods As New HashSet(Of String)(If(saved.SelectedMods, New List(Of String)), StringComparer.OrdinalIgnoreCase)
+            For Each box In PanGroupFiles.Children.OfType(Of CheckBox)()
+                Dim path = CStr(box.Tag)
+                box.IsChecked = If(path.StartsWith("mods/", StringComparison.OrdinalIgnoreCase), saved.SelectedMods Is Nothing OrElse mods.Contains(path), selectedShared.Contains(path))
+            Next
+        Catch ex As Exception
+            MyMsgBox(ex.Message, "无法读取上次选择", IsWarn:=True)
+        End Try
     End Sub
 
 #Region "子选项"
@@ -421,6 +471,30 @@ Public Class PageInstanceExport
     Private Sub StartExport() Handles BtnExport.Click
         Dim PackName As String = If(String.IsNullOrEmpty(TextExportName.Text), TextExportName.HintText, TextExportName.Text)
         Dim PackVersion As String = If(String.IsNullOrEmpty(TextExportVersion.Text), "1.0.0", TextExportVersion.Text)
+        Dim GroupMode As Boolean = CheckGroupExport.IsChecked = True
+        Dim GroupFiles As New List(Of String)
+        Dim GroupId As Guid = Guid.Empty
+        If GroupMode Then
+            Try
+                Dim instance = PageInstanceLeft.Instance
+                If Not PathUtils.IsSame(instance.PathVersion, instance.PathIndie) Then Throw New Exception("小队导出需要开启版本隔离。")
+                Dim loaderCount = {ModLoaders.Forge, ModLoaders.NeoForge, ModLoaders.Fabric}.Count(Function(l) instance.Version.ModLoaders.HasFlagF(l))
+                If loaderCount <> 1 Then Throw New Exception("小队导出需要一个受支持的 Forge、NeoForge 或 Fabric 加载器。")
+                GroupFiles = PanGroupFiles.Children.OfType(Of CheckBox)().Where(Function(c) c.IsChecked = True).Select(Function(c) CStr(c.Tag)).ToList()
+                Dim current = PCLCS.PackSync.PackSyncPublisher.EnumerateCandidates(instance.PathVersion)
+                If GroupFiles.Any(Function(f) Not current.Contains(f, StringComparer.OrdinalIgnoreCase)) Then Throw New Exception("选择的文件已变化，请重新选择。")
+                Dim identity = TryCast(ComboGroupIdentity.SelectedItem, ComboBoxItem)
+                If identity Is Nothing Then Throw New Exception("请选择小队身份。")
+                If CStr(identity.Tag) = "new" Then
+                    GroupId = Guid.NewGuid()
+                ElseIf Not Guid.TryParse(CStr(identity.Tag), GroupId) OrElse GroupId = Guid.Empty Then
+                    Throw New Exception("小队身份无效，请重新选择。")
+                End If
+            Catch ex As Exception
+                MyMsgBox(ex.Message, "无法准备小队导出", IsWarn:=True)
+                Return
+            End Try
+        End If
 
         '重复任务检查
         Dim LoaderName As String = $"导出整合包：" & PackName
@@ -432,7 +506,25 @@ Public Class PageInstanceExport
 
         '确认导出位置
         Dim PackPath As String = Nothing
-        If Not String.IsNullOrWhiteSpace(ConfigPackPath) AndAlso
+        Dim ExplicitGroupPath As Boolean = False
+        If GroupMode AndAlso Not String.IsNullOrWhiteSpace(TextGroupOutput.Text) Then
+            Try
+                Dim requested = TextGroupOutput.Text.Trim().Trim(""""c)
+                Dim hasDriveRoot = requested.Length >= 3 AndAlso Char.IsLetter(requested(0)) AndAlso requested(1) = ":"c AndAlso
+                    (requested(2) = "\"c OrElse requested(2) = "/"c)
+                Dim hasNetworkRoot = requested.StartsWith("\\", StringComparison.Ordinal) AndAlso Path.GetPathRoot(requested).Length > 2
+                If (Not hasDriveRoot AndAlso Not hasNetworkRoot) OrElse Not requested.EndsWith(".mrpack", StringComparison.OrdinalIgnoreCase) Then
+                    Throw New IOException("请输入以 .mrpack 结尾的完整文件路径。")
+                End If
+                PackPath = Path.GetFullPath(requested)
+                If File.Exists(PackPath) OrElse Directory.Exists(PackPath) Then Throw New IOException("保存路径已存在，请使用新文件名或通过文件选择窗口确认覆盖。")
+                ExplicitGroupPath = True
+            Catch ex As Exception
+                MyMsgBox(ex.Message, "无法使用保存路径", IsWarn:=True)
+                Return
+            End Try
+        End If
+        If Not GroupMode AndAlso Not String.IsNullOrWhiteSpace(ConfigPackPath) AndAlso
            (Not ConfigPackPath.EndsWithF("\") AndAlso Not ConfigPackPath.EndsWithF("/")) Then
             Try
                 DirectoryUtils.Create(PathUtils.RemoveLastPart(ConfigPackPath))
@@ -445,14 +537,34 @@ Public Class PageInstanceExport
         End If
         If PackPath Is Nothing Then
             Dim Extensions As New List(Of (Extension As String, Display As String))
-            If Not CheckOptionsPcl.Checked AndAlso CheckAdvancedModrinth.Checked Then Extensions.Add(("mrpack", "Modrinth 整合包文件"))
-            Extensions.Add(("zip", "压缩文件"))
-            If Not CheckOptionsPcl.Checked AndAlso Not CheckAdvancedModrinth.Checked Then Extensions.Add(("mrpack", "Modrinth 整合包文件"))
+            If GroupMode Then
+                Extensions.Add(("mrpack", "小队整合包文件"))
+            Else
+                If Not CheckOptionsPcl.Checked AndAlso CheckAdvancedModrinth.Checked Then Extensions.Add(("mrpack", "Modrinth 整合包文件"))
+                Extensions.Add(("zip", "压缩文件"))
+                If Not CheckOptionsPcl.Checked AndAlso Not CheckAdvancedModrinth.Checked Then Extensions.Add(("mrpack", "Modrinth 整合包文件"))
+            End If
             PackPath = Dialogs.SaveFile("选择导出位置",
                 PackName & If(String.IsNullOrEmpty(TextExportVersion.Text), "", " " & TextExportVersion.Text), filter:=Extensions)
             Logger.Info($"手动指定的导出路径：{PackPath}")
         End If
         If PackPath Is Nothing Then Return
+        If GroupMode Then
+            Try
+                If Not PackPath.EndsWith(".mrpack", StringComparison.OrdinalIgnoreCase) Then Throw New Exception("请选择 .mrpack 文件。")
+                PCLCS.PackSync.PackSyncPublisher.Save(PageInstanceLeft.Instance.PathVersion, GroupId,
+                    GroupFiles.Where(Function(f) Not f.StartsWith("mods/", StringComparison.OrdinalIgnoreCase)),
+                    GroupFiles.Where(Function(f) f.StartsWith("mods/", StringComparison.OrdinalIgnoreCase)))
+                BtnReuseGroupChoices.IsEnabled = True
+                ComboGroupIdentity.Items.Clear()
+                ComboGroupIdentity.Items.Add(New ComboBoxItem With {.Content = "沿用维护者小队  " & GroupId.ToString(), .Tag = GroupId.ToString()})
+                ComboGroupIdentity.Items.Add(New ComboBoxItem With {.Content = "新建小队", .Tag = "new"})
+                ComboGroupIdentity.SelectedIndex = 0
+            Catch ex As Exception
+                MyMsgBox(ex.Message, "无法保存小队设置", IsWarn:=True)
+                Return
+            End Try
+        End If
 
         '缓存所需参数
         Dim CacheFolder = RequestTaskTempFolder()
@@ -466,8 +578,15 @@ Public Class PageInstanceExport
         Dim ModrinthUploadMode As Boolean = CheckAdvancedModrinth.Checked
         Dim IncludePCL As Boolean = CheckOptionsPcl.Checked
         Dim IncludePCLCustom As Boolean = IncludePCL AndAlso CheckOptionsPclCustom.Checked
-        Dim AllRules = StandardizeLines(GetAllRules(), True).ToList()
-        Dim AllExtraFiles = StandardizeLines(GetExtraFileLines(), False).ToList()
+        Dim AllRules = If(GroupMode, New List(Of String), StandardizeLines(GetAllRules(), True).ToList())
+        Dim AllExtraFiles = If(GroupMode, New List(Of String), StandardizeLines(GetExtraFileLines(), False).ToList())
+        If GroupMode Then
+            IncludeJava = False
+            IncludePCL = False
+            IncludePCLCustom = False
+            CheckHostedAssets = True
+            ModrinthUploadMode = False
+        End If
         Logger.Info($"准备导出整合包，共有 {AllRules.Count} 条规则，{AllExtraFiles.Count} 条追加内容行")
 
         '构造步骤加载器
@@ -531,7 +650,23 @@ Public Class PageInstanceExport
                     End If
                 Next
             End Sub
-            SearchFolder(DirectoryUtils.GetInfo(PathIndie))
+            If GroupMode Then
+                Dim candidates = PCLCS.PackSync.PackSyncPublisher.EnumerateCandidates(PathIndie)
+                For Each relative In GroupFiles
+                    If Not candidates.Contains(relative, StringComparer.OrdinalIgnoreCase) Then Throw New Exception("文件已变化：" & relative)
+                    Dim source = Path.Combine(PathIndie, relative.Replace("/"c, "\"c))
+                    Dim destination = Path.Combine(OverridesFolder, relative.Replace("/"c, "\"c))
+                    FileUtils.Copy(source, destination)
+                    If relative.StartsWith("mods/", StringComparison.OrdinalIgnoreCase) Then
+                        Dim modFile As New LocalResourceFile(destination)
+                        Dim unused = modFile.ModrinthHash
+                        unused = modFile.CurseForgeHash
+                        Loader.Output.Add(modFile)
+                    End If
+                Next
+            Else
+                SearchFolder(DirectoryUtils.GetInfo(PathIndie))
+            End If
             Logger.Info($"复制 overrides 文件完成，有 {Loader.Output.Count} 个文件需要联网检查")
             Loader.Progress = 0.85
             '复制 Java
@@ -563,8 +698,10 @@ Public Class PageInstanceExport
             Next
             Loader.Progress = 0.97
             '复制 PCL 版本设置
-            If DirectoryUtils.Exists(TargetInstance.PathVersion & "PCL\") Then DirectoryUtils.Copy(TargetInstance.PathVersion & "PCL\", OverridesFolder & "PCL\")
-            WriteIni(OverridesFolder & "PCL\Setup.ini", "IsStar", False)
+            If Not GroupMode Then
+                If DirectoryUtils.Exists(TargetInstance.PathVersion & "PCL\") Then DirectoryUtils.Copy(TargetInstance.PathVersion & "PCL\", OverridesFolder & "PCL\")
+                WriteIni(OverridesFolder & "PCL\Setup.ini", "IsStar", False)
+            End If
             '复制 PCL 本体（正式版）
             If BuildType = BuildTypes.Release AndAlso IncludePCL Then FileUtils.Copy(PathExe, CacheFolder & "Plain Craft Launcher.exe")
             '复制 PCL 个性化内容
@@ -591,6 +728,7 @@ Public Class PageInstanceExport
 
             '分平台获取下载地址
             Dim EndedThreadCount As Integer = 0, FailedExceptions As New List(Of Exception)
+            Dim ResultsLock As New Object
 
             '从 Modrinth 获取信息
             RunInNewThread(
@@ -604,15 +742,21 @@ Public Class PageInstanceExport
                         If Not ModrinthRaw.ContainsKey(ModFile.ModrinthHash) Then Continue For
                         If ModrinthRaw(ModFile.ModrinthHash)?("files")?(0)("hashes")?("sha1") <> ModFile.ModrinthHash Then Continue For
                         '写入下载地址
-                        Loader.Output.AddIntoValueCollection(ModFile, ModrinthRaw(ModFile.ModrinthHash)("files")(0)("url"))
+                        SyncLock ResultsLock
+                            Loader.Output.AddIntoValueCollection(ModFile, ModrinthRaw(ModFile.ModrinthHash)("files")(0)("url"))
+                        End SyncLock
                     Next
                     Logger.Info($"从 Modrinth 获取到 {ModrinthRaw.Count} 个本地资源项的对应信息")
                 Catch ex As Exception
                     Logger.Warn(ex, "从 Modrinth 获取本地 Mod 信息失败")
-                    FailedExceptions.Add(ex)
+                    SyncLock ResultsLock
+                        FailedExceptions.Add(ex)
+                    End SyncLock
                 Finally
-                    EndedThreadCount += 1
-                    Loader.Progress += 0.45
+                    SyncLock ResultsLock
+                        Loader.Progress += 0.45
+                    End SyncLock
+                    Threading.Interlocked.Increment(EndedThreadCount)
                 End Try
             End Sub, "Modrinth - " & LoaderName)
 
@@ -633,21 +777,27 @@ Public Class PageInstanceExport
                         If ModFile Is Nothing Then Continue For
                         '写入下载地址
                         For Each Address In ResourceVersion.ParseCurseForgeDownloadUrls(File("downloadUrl").ToString)
-                            Loader.Output.AddIntoValueCollection(ModFile, Address)
+                            SyncLock ResultsLock
+                                Loader.Output.AddIntoValueCollection(ModFile, Address)
+                            End SyncLock
                         Next
                     Next
                     Logger.Info($"从 CurseForge 获取到 {CurseForgeRaw.Count} 个本地资源项的对应信息")
                 Catch ex As Exception
                     Logger.Warn(ex, "从 CurseForge 获取本地 Mod 信息失败")
-                    FailedExceptions.Add(ex)
+                    SyncLock ResultsLock
+                        FailedExceptions.Add(ex)
+                    End SyncLock
                 Finally
-                    EndedThreadCount += 1
-                    Loader.Progress += 0.45
+                    SyncLock ResultsLock
+                        Loader.Progress += 0.45
+                    End SyncLock
+                    Threading.Interlocked.Increment(EndedThreadCount)
                 End Try
             End Sub, "CurseForge - " & LoaderName)
 
             '等待线程结束
-            Do Until EndedThreadCount = 2
+            Do Until Threading.Volatile.Read(EndedThreadCount) = 2
                 If Loader.IsCanceled Then Return
                 Thread.Sleep(10)
             Loop
@@ -700,6 +850,7 @@ Public Class PageInstanceExport
                 {"dependencies", Dependencies}
             }
             FileUtils.Write(CacheFolder & "modpack\modrinth.index.json", ResultJson.ToString(Newtonsoft.Json.Formatting.Indented))
+            If GroupMode Then FileUtils.Write(CacheFolder & "modpack\pcl-group.json", New JObject From {{"schemaVersion", 1}, {"packId", GroupId.ToString()}}.ToString(Newtonsoft.Json.Formatting.Indented))
             '打包
             If IncludePCL Then
                 '首次压缩整合包
@@ -712,7 +863,19 @@ Public Class PageInstanceExport
                 Loader.Progress = 0.9
             Else
                 '直接压缩整合包
-                FileUtils.CreateZipFromDirectory(PackPath, CacheFolder & "modpack\")
+                If ExplicitGroupPath Then
+                    Dim parent = Path.GetDirectoryName(PackPath)
+                    DirectoryUtils.Create(parent)
+                    Dim outputTemp = Path.Combine(parent, ".pcl-group-" & Guid.NewGuid().ToString("N") & ".tmp")
+                    Try
+                        FileUtils.CreateZipFromDirectory(outputTemp, CacheFolder & "modpack\")
+                        File.Move(outputTemp, PackPath) 'Never replace a file created after validation.
+                    Finally
+                        If File.Exists(outputTemp) Then File.Delete(outputTemp)
+                    End Try
+                Else
+                    FileUtils.CreateZipFromDirectory(PackPath, CacheFolder & "modpack\")
+                End If
                 Loader.Progress = 0.8
             End If
             OpenExplorer(PackPath)

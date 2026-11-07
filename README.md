@@ -9,6 +9,10 @@
 代码并不是实时更新的，它会在每次 PCL 发布更新时同步一次。<br/>
 非常感谢社区的大力支持！
 
+### CurseForge API 配置
+
+开源版使用 CurseForge API 时，需要自行申请 API Key，并将其保存为 Windows 用户环境变量 `PCL_CURSEFORGE_API_KEY`。重新启动启动器后生效。启动器优先读取进程环境变量；若进程中未设置，则读取当前 Windows 用户的环境变量。请勿将 API Key 写入源码或提交到 GitHub。
+
 <br/>
 
 ### 相关资源

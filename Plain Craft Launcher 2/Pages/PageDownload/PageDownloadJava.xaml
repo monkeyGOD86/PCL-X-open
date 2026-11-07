@@ -1,0 +1,32 @@
+<local:MyPageRight x:Class="PageDownloadJava"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:local="clr-namespace:PCL" PanScroll="PanBack">
+    <local:MyScrollViewer x:Name="PanBack" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+        <StackPanel x:Name="PanMain" Margin="25,10">
+            <local:MyCard Title="游戏版本推荐" Margin="0,15,0,0">
+                <StackPanel Margin="21,40,21,16">
+                    <TextBlock Text="Minecraft 正式版对应的推荐 Java 版本" Margin="0,0,0,8" />
+                    <TextBlock Text="1.16.5 及更早版本  →  Java 8" Margin="0,4" />
+                    <TextBlock Text="1.17 - 1.17.1  →  Java 16" Margin="0,4" />
+                    <TextBlock Text="1.18 - 1.20.4  →  Java 17" Margin="0,4" />
+                    <TextBlock Text="1.20.5 - 1.21.11  →  Java 21" Margin="0,4" />
+                    <TextBlock Text="26.1 - 26.3  →  Java 25" Margin="0,4" />
+                    <TextBlock Text="预览版、整合包和 Mod 可能有不同要求，请以其说明为准。" TextWrapping="Wrap" Opacity="0.7" Margin="0,10,0,0" />
+                </StackPanel>
+            </local:MyCard>
+            <local:MyCard Title="Java 下载" Margin="0,15,0,15">
+                <StackPanel Margin="21,40,21,16">
+                    <TextBlock Text="点击按钮打开 Eclipse Temurin 官网，选择适合系统和架构的版本。" TextWrapping="Wrap" Margin="0,0,0,10" />
+                    <WrapPanel>
+                        <local:MyButton Text="Java 8" Width="110" Height="35" Margin="0,0,10,10" local:CustomEventService.EventType="打开网页" local:CustomEventService.EventData="https://adoptium.net/temurin/releases/?version=8" />
+                        <local:MyButton Text="Java 16" Width="110" Height="35" Margin="0,0,10,10" local:CustomEventService.EventType="打开网页" local:CustomEventService.EventData="https://adoptium.net/temurin/releases/?version=16" />
+                        <local:MyButton Text="Java 17" Width="110" Height="35" Margin="0,0,10,10" local:CustomEventService.EventType="打开网页" local:CustomEventService.EventData="https://adoptium.net/temurin/releases/?version=17" />
+                        <local:MyButton Text="Java 21" Width="110" Height="35" Margin="0,0,10,10" local:CustomEventService.EventType="打开网页" local:CustomEventService.EventData="https://adoptium.net/temurin/releases/?version=21" />
+                        <local:MyButton Text="Java 25" Width="110" Height="35" Margin="0,0,10,10" local:CustomEventService.EventType="打开网页" local:CustomEventService.EventData="https://adoptium.net/temurin/releases/?version=25" />
+                    </WrapPanel>
+                </StackPanel>
+            </local:MyCard>
+        </StackPanel>
+    </local:MyScrollViewer>
+</local:MyPageRight>

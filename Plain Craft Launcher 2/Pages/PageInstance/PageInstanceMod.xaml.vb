@@ -305,6 +305,12 @@ Public Class PageInstanceMod
         Else
             '处于 Mod 管理页面
 Install:
+            If McInstanceLock.IsLocked(Instance) Then
+                Hint("该版本正在被修改，请稍后再安装 Mod。", HintType.Red)
+                Return True
+            End If
+            Using lease = PackSyncModFolderLock.TryAcquire(Instance.PathIndie & "mods\")
+            If lease Is Nothing Then Hint("Mod 文件夹正在被修改，请稍后再试。", HintType.Red) : Return True
             Try
                 For Each ModFile In FilePathList
                     Dim NewFileName = (New LocalResourceFile(ModFile)).EnabledName
@@ -326,6 +332,7 @@ Install:
             Catch ex As Exception
                 Logger.Error(ex, "复制 Mod 文件失败", LogBehavior.Alert)
             End Try
+            End Using
         End If
         Return True
     End Function
@@ -456,6 +463,12 @@ Install:
         ChangeAllSelected(False)
     End Sub
     Private Sub EDMods(ModList As IEnumerable(Of LocalResourceFile), IsEnable As Boolean)
+        If McInstanceLock.IsLocked(PageInstanceLeft.Instance) Then
+            Hint("该版本正在被修改，请稍后再切换 Mod 状态。", HintType.Red)
+            Return
+        End If
+        Using lease = PackSyncModFolderLock.TryAcquire(PageInstanceLeft.Instance.PathIndie & "mods\")
+        If lease Is Nothing Then Hint("Mod 文件夹正在被修改，请稍后再试。", HintType.Red) : Return
         Dim IsSuccessful As Boolean = True
         For Each ModE In ModList.ToList
             Dim ModEntity = ModE '仅用于去除迭代变量无法修改的限制
@@ -522,6 +535,7 @@ Install:
             ReloadModList(True)
         End If
         LoaderRun(LoaderFolderRunType.UpdateOnly)
+        End Using
     End Sub
 
     '更新
@@ -536,6 +550,11 @@ Install:
     ''' </summary>
     Public Shared UpdatingInstanceModFolders As New List(Of String)
     Public Sub UpdateMods(ModList As IEnumerable(Of LocalResourceFile))
+        Dim TargetInstance = PageInstanceLeft.Instance
+        If TargetInstance Is Nothing OrElse McInstanceLock.IsLocked(TargetInstance) Then
+            Hint("该版本正在被修改，请稍后再更新 Mod。", HintType.Red)
+            Return
+        End If
         '更新前警告
         If Not Settings.Get(Of Boolean)("HintUpdateMod") OrElse ModList.Count >= 15 Then
             If MyMsgBox($"新版本 Mod 可能不兼容旧存档或者其他 Mod，这可能导致游戏崩溃，甚至永久损坏存档！{vbCrLf}如果你在游玩整合包，请千万不要自行更新 Mod！{vbCrLf}{vbCrLf}在更新前，请先备份存档，并检查 Mod 的更新日志。{vbCrLf}如果更新后出现问题，你也可以在回收站找回更新前的 Mod。", "Mod 更新警告", "我已了解风险，继续更新", "取消", IsWarn:=True) = 1 Then
@@ -588,6 +607,8 @@ Install:
             InstallLoaders.Add(New LoaderDownload("下载新版 Mod 文件", FileList) With {.ProgressWeight = ModList.Count * 1.5}) '每个 Mod 需要 1.5s
             InstallLoaders.Add(New LoaderTask(Of Integer, Integer)("替换旧版 Mod 文件",
             Sub()
+                Using lease = PackSyncModFolderLock.TryAcquire(TargetInstance.PathIndie & "mods\")
+                If lease Is Nothing Then Throw New IOException("Mod 文件夹正在被修改，请稍后重试更新。")
                 Try
                     For Each Entry As LocalResourceFile In ModList
                         If FileUtils.Exists(Entry.File.FullName) Then
@@ -607,10 +628,11 @@ Install:
                 Catch ex As OperationCanceledException
                     Logger.Warn(ex, "替换旧版 Mod 文件时被主动取消")
                 End Try
+                End Using
             End Sub))
             '结束处理
             Dim Loader As New LoaderCombo(Of IEnumerable(Of LocalResourceFile))("Mod 更新：" & PageInstanceLeft.Instance.Name, InstallLoaders)
-            Dim PathMods As String = PageInstanceLeft.Instance.PathIndie & "mods\"
+            Dim PathMods As String = TargetInstance.PathIndie & "mods\"
             Loader.OnStateChanged =
             Sub()
                 '结果提示
@@ -664,6 +686,12 @@ Install:
         ChangeAllSelected(False)
     End Sub
     Private Sub DeleteMods(ModsToDelete As IEnumerable(Of LocalResourceFile))
+        If McInstanceLock.IsLocked(PageInstanceLeft.Instance) Then
+            Hint("该版本正在被修改，请稍后再删除 Mod。", HintType.Red)
+            Return
+        End If
+        Using lease = PackSyncModFolderLock.TryAcquire(PageInstanceLeft.Instance.PathIndie & "mods\")
+        If lease Is Nothing Then Hint("Mod 文件夹正在被修改，请稍后再试。", HintType.Red) : Return
         Try
             Dim IsSuccessful As Boolean = True
             Dim IsShiftPressed As Boolean = My.Computer.Keyboard.ShiftKeyDown
@@ -722,6 +750,7 @@ Install:
             ReloadModList(True)
         End Try
         LoaderRun(LoaderFolderRunType.UpdateOnly)
+        End Using
     End Sub
 
     '取消选择

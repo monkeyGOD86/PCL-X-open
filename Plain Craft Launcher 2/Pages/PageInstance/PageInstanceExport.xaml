@@ -13,6 +13,16 @@
         </Grid.Resources>
         <local:MyScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" x:Name="PanBack">
             <StackPanel Margin="25,10,25,65">
+                <CheckBox x:Name="CheckGroupExport" Content="用于小队同步" Margin="0,12,0,4" />
+                <StackPanel x:Name="PanGroupExport" Visibility="Collapsed" Margin="15,0,0,10">
+                    <TextBlock Text="小队身份" Margin="0,4,0,4" />
+                    <ComboBox x:Name="ComboGroupIdentity" HorizontalAlignment="Left" MinWidth="300" Margin="0,0,0,6" />
+                    <local:MyButton x:Name="BtnReuseGroupChoices" Text="沿用上次选择" Height="30" Width="140" HorizontalAlignment="Left" Margin="0,0,0,6" IsEnabled="False" />
+                    <TextBlock Text="选择要同步的 Mod 和共享文件。小队包固定为 .mrpack，不包含启动器、Java、存档或个人设置。" TextWrapping="Wrap" Margin="0,4,0,6" />
+                    <StackPanel x:Name="PanGroupFiles" />
+                    <TextBlock Text="保存路径（可选；留空时选择保存位置）" TextWrapping="Wrap" Margin="0,10,0,4" />
+                    <TextBox x:Name="TextGroupOutput" MinHeight="32" VerticalContentAlignment="Center" />
+                </StackPanel>
                 <local:MyHint Margin="0,15,0,0" Text="受 Modrinth 整合包规范限制，导出的整合包中不会包含 OptiFine。" Theme="Yellow" x:Name="HintOptiFine" />
                 <local:MyHint Margin="0,15,0,0" Theme="Yellow" x:Name="HintJava" />
                 <local:MyCard Margin="0,15">
@@ -280,7 +290,7 @@
                         </StackPanel>
                     </StackPanel>
                 </local:MyCard>
-                <local:MyCard Title="高级选项" Margin="0,0,0,15" CanSwap="True" IsSwapped="True">
+                <local:MyCard x:Name="CardAdvanced" Title="高级选项" Margin="0,0,0,15" CanSwap="True" IsSwapped="True">
                     <StackPanel Margin="25,37,23,20">
                         <local:MyHint Text="建议仅在无法稳定连接 CurseForge 或 Modrinth 时才打包资源文件。&#xa;请不要公开发布含资源文件的整合包，这会违反部分 Mod 的使用协议！"
                                       Theme="Yellow" Margin="0,2,0,8" Visibility="{Binding Checked, ElementName=CheckAdvancedInclude, Converter={StaticResource BooleanToVisibilityConverter}}" />

@@ -189,6 +189,15 @@ Public Class PageSpeedLeft
                     Card.Children.Add(Cancel)
                     AddHandler Cancel.Click,
                     Sub(sender As MyIconButton, e As EventArgs)
+                        Dim syncTask = TryCast(Loader, PackSyncTask)
+                        If syncTask IsNot Nothing Then
+                            If syncTask.TryCancelSync() Then
+                                Hint("已请求取消小队同步；如已开始修改，将先恢复原文件。", HintType.Blue)
+                            Else
+                                Hint("小队同步正在提交状态，请等待完成。", HintType.Blue)
+                            End If
+                            Return
+                        End If
                         AniDispose(sender, False)
                         AniDispose(Card, True, Sub() If FrmSpeedRight.PanMain.Children.Count = 0 AndAlso FrmMain.PageCurrent = FormMain.PageType.TaskManager Then FrmMain.PageBack())
                         RightCards.Remove(Loader.Name)

@@ -883,8 +883,13 @@ ExitDataLoad:
         Public Shared Function TryAcquire(Worker As IWorker, InstancePath As String) As Boolean
             InstancePath = PathUtils.ForCompare(InstancePath)
             If Not LockedPaths.TryAdd(InstancePath, Worker) Then Return False
-            AddHandler Worker.Stopped, Sub() LockedPaths.TryRemove(InstancePath, Nothing)
+            AddHandler Worker.Stopped, Sub() Release(Worker, InstancePath)
             Return True
+        End Function
+        ''' <summary>Only the owner can release a lock; used if its worker could not start.</summary>
+        Public Shared Function Release(Worker As IWorker, InstancePath As String) As Boolean
+            Dim Entry As New KeyValuePair(Of String, IWorker)(PathUtils.ForCompare(InstancePath), Worker)
+            Return DirectCast(LockedPaths, ICollection(Of KeyValuePair(Of String, IWorker))).Remove(Entry)
         End Function
         ''' <summary>
         ''' 检查 MC 版本是否正被锁定。
